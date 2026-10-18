@@ -727,8 +727,22 @@ void Entity::destroy()
 	}
 	if(this->cameraId != UninitializedPoolId)
 	{
-		if(Globals::Game::mainCamera == this->cameraId) Globals::Game::mainCamera = UninitializedPoolId;
+		bool wasMain = Globals::Game::mainCamera == this->cameraId;
+		if(wasMain) Globals::Game::mainCamera = UninitializedPoolId;
 		Globals::Game::cameras.remove(this->cameraId);
+
+		/* The game always needs a main camera (getMainCamera throws without): the first camera that is left and renders to the screen takes over. */
+		if(wasMain)
+		{
+			for(uint32_t i = 0; i < Globals::Game::cameras.objects.size(); i++)
+			{
+				if(Globals::Game::cameras.alive[i] && Globals::Game::cameras.objects[i].renderTarget() == nullptr)
+				{
+					Globals::Game::mainCamera = PoolId(i, Globals::Game::cameras.generation[i]);
+					break;
+				}
+			}
+		}
 		this->cameraId = UninitializedPoolId;
 	}
 	if(this->stateId != UninitializedPoolId)

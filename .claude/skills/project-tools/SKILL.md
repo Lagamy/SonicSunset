@@ -23,7 +23,7 @@ Rules: never build or run the app. Run only tools that read existing files. NEVE
 - `genEntityKeys.py [stage ...]` (default stg0100) → `src/STH2005EntityKeys.h` and `External/Prefabs/STH2005/Placement.json` (reads the hand-written `tools/data/STH2005Objects.json`). `genCCLKeys.py` → `src/STH2005ShapeKeys.h`. `genSAEntityKeys.py` → `src/SAEntityKeys.h` and `External/Prefabs/SADX/Placement.json` (reads the hand-written `tools/data/SADXObjectModels.json`). `genSAShapeKeys.py` → `src/SAShapeKeys.h` (needs sadxDecomp pseudocode).
 - `dumpCCL.py [outDir] | -x NAME (hex) | -p NAME (parsed) | --check (strict all)`: Shadow `.CCL` entries.
 
-## glTF attribute round trip (Map.gltf pipeline step 0; written 2026-10-14, not run)
+## glTF attribute round trip (HubWorld.gltf pipeline step 0; written 2026-10-14, not run)
 - `python3 tools/gltfAttrWrite.py [--out DIR/probe.gltf]`: writes a tiny probe glTF + `.bin` + `.expected.json` (custom `_SRC/_SRCFLAG/_SRCIDX/_ORIG` and the TEXCOORD_1..3 fallback); no disc data.
 - `python3 tools/gltfAttrCheck.py FILE.gltf|.glb [--expected X.expected.json] [--tool "name, options"] [--ai]`: what survived the colleague's re-export, per channel (EXACT/RETYPED/RENAMED/MOVED/PARTIAL/CHANGED/DROPPED), and `verdict=` (PRIMARY=custom, FALLBACK=texcoord, NONE). Use `--ai`.
 

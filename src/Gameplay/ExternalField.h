@@ -3,7 +3,7 @@
 #include <glm/glm.hpp>
 #include "PoolId.h"
 
-/* The kinds of value a script behaviour can declare as a field (sf.behavior's third argument): the inspector shows a widget for each; entity and prefab are set by drag and drop. */
+/* The kinds of value a script behaviour can declare as a field (sf.behavior's third argument): the inspector shows a widget for each; entity, prefab and level are set by drag and drop. */
 enum class ExternalType
 {
 	Number,
@@ -11,11 +11,12 @@ enum class ExternalType
 	String,
 	Vec3,
 	Entity,
-	Prefab
+	Prefab,
+	Level
 };
 
 /*
-One value of a field. Only the member the field's type names is used. An entity is a PoolId in Globals::Game::entities and a prefab one in Globals::Game::prefabs (UninitializedPoolId = none). entityIndex is the entity's place in
+One value of a field. Only the member the field's type names is used. An entity is a PoolId in Globals::Game::entities and a prefab one in Globals::Game::prefabs (UninitializedPoolId = none). A level is its name in text (empty = none). entityIndex is the entity's place in
 its level while the value is not on a live entity (kept over Stop, Editor::KeptEntity): an entity's PoolId does not survive the level being made again.
 */
 struct ExternalValue

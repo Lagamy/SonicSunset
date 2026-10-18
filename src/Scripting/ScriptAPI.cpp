@@ -32,9 +32,9 @@ error if the handle is of an entity that is gone. Vectors are three numbers (x, 
 - animation: animate(e, name [, framesPerGameFrame]) (Sonic's motions by name: stand, walk, speedwalk, jog, run, sprint, brake, turnAround, springFall, fall, landing, damage, jump and roll (curled model), standAlt, landFall, waitA, waitB, waitBack (waitA backwards: give it a negative rate), rollEnd, ball (jumpball model); for a Shadow entity: stand, walk, run, jump, jumpB (play once), jumpC, fall, brake, damage, skate, highSkate; it loops), pose(e, {{name, frame, weight}, ...}), setAnimationScaleMode(n), setAnimationEulerOrder(n), motionRange(e, name) and bone(e, name) (a Shadow entity's mixed pose, see below), lowestPoint(e) (the lowest y of a Shadow entity's vertices, posed and at rest), blink(e, name | false) (draws that animation in place of the animate one while it is on; the animate one keeps its own clock)
 - entities: exists(e), name(e), position(e), setPosition(e, x, y, z), moveTo(e, x, y, z), turnY(e, radians), orient(e, yaw, nx, ny, nz), setModelTransform(e [, tx, ty, tz, rotZ, sx, sy, sz]), destroy(e), state(e), axis(e, x, y, z), setUncullable(e, bool), postEvent(name, e [, x, y, z]), setDashTrail(e, bool) (the jump dash ribbon, Graphics::DashTrail), setEffectBall(e, kind, bool) (Shadow's effect balls, Graphics::EffectBalls; kind "jumpA", "dashB" or "fallB"), spawnDashSphere(kind, e, dx, dy, dz [, heading [, nx, ny, nz]]) (SADX Sonic's homing burst, aura and spin dash charge sphere, Graphics::DashSpheres; kind "burst", "aura" or "charge"), spawnDashTrail(e, dx, dy, dz) (one tick's segment of SADX Sonic's roll / homing trail from the entity's centre, Graphics::SonicTrail)
 - bodies (an entity with a physics): hasBody(e), velocity(e), setVelocity(e, x, y, z), setGroundSnap(e, distance), setGroundSnapMode(e, {ray, radius, minNormalY, blockedByWall, whileRising}), setMeanVelocityMove(e, on), setFaceContact(e, on), setWeight(e, w), grounded(e), groundNormal(e), groundSurface(e), groundGap(e, maxGap), touchingWall(e), wallNormal(e)
-- behaviours: behavior(name, fn [, fields]) (fields = {name = {type = "number" | "bool" | "string" | "vec3" | "entity" | "prefab", default = v, external = bool}}: written into sf.state(e) before the first call; the external ones are set per entity in the editor's Inspector; a prefab field holds the prefab's name, an entity field a handle or sf.none, a vec3 {x, y, z}), give(e, name), prefabBehavior(prefabName, fn) (fn(entity, placement) is called for every entity made from that prefab, prefabName like "SADX/SPRING"; placement is the SET record {type, rotation, position, scale} or nil)
-- collision: onTouch(name, fn), tag(name), collisionBehavior(name, {tags, collidesWith, interactions}), setShapeBehavior(e, behavior)
-- setup: spawn(prefabName, x, y, z) (makes an entity from a prefab by its name, "SADX/SPRING", "Global/Bullet"; returns it), loadLevel(name) (the name of a Levels/<name>/ folder: "EmeraldCoast", "Stg0100", "Stg0000"; returns the level), unloadLevel(level) (done at the start of the next tick), levelExists(level), levels() (every level's handle, in a table), levelName(level), resetLevel(level) (destroyed and built again from its recipe at the start of the next tick), spawnPlayer(character, x, y, z) ("sonic", "shadow"; returns the entity, which the script then attaches), setCamera(x, y, z)
+- behaviours: behavior(name, fn [, fields]) (fields = {name = {type = "number" | "bool" | "string" | "vec3" | "entity" | "prefab" | "level", default = v, external = bool}}: written into sf.state(e) before the first call; the external ones are set per entity in the editor's Inspector; a prefab field holds the prefab's name, an entity field a handle or sf.none, a vec3 {x, y, z}), give(e, name), prefabBehavior(prefabName, fn) (fn(entity, placement) is called for every entity made from that prefab, prefabName like "SADX/SPRING"; placement is the SET record {type, rotation, position, scale} or nil)
+- collision: onTouch(name, fn), tag(name), collisionBehavior(name, {tags, collidesWith, interactions, fields}), setShapeBehavior(e, behavior)
+- setup: spawn(prefabName, x, y, z) (makes an entity from a prefab by its name, "SADX/SPRING", "Global/Bullet"; returns it), loadLevel(name) (the name of a Levels/<name>/ folder: "EmeraldCoast", "Stg0100", "Stg0000"; loads that level alone and returns it), loadHubWorld([name]) (every level of HubWorld.json at its place; returns the active one, the name given or the first entry), unloadLevel(level) (done at the start of the next tick), levelExists(level), levels() (every level's handle, in a table), levelName(level), resetLevel(level) (destroyed and built again from its recipe at the start of the next tick), spawnPlayer(character, x, y, z) ("sonic", "shadow"; returns the entity, which the script then attaches), setCamera(x, y, z)
 - scripts: include(path), rotateBamsZXY(x, y, z, az, ax, ay), none
 */
 namespace Scripting
@@ -559,11 +559,11 @@ static int wallNormal(lua_State* pLua_)
 
 /*
 Reads the fields table of sf.behavior (the table at index tableIndex_): {name = {type = "number" | "bool" | "string" | "vec3" | "entity" | "prefab", default = value, external = bool}, ...}. The default of a vec3 is {x, y, z} (or x =, y =, z =);
-an entity or prefab has none. The fields are sorted by name (a Lua table has no order), which is the order the inspector lists them in.
+an entity, prefab or level has none. The fields are sorted by name (a Lua table has no order), which is the order the inspector lists them in.
 */
 static std::vector<ExternalField> readFields(lua_State* pLua_, int tableIndex_)
 {
-	static const std::unordered_map<std::string, ExternalType> types = {{"number", ExternalType::Number}, {"bool", ExternalType::Bool}, {"string", ExternalType::String}, {"vec3", ExternalType::Vec3}, {"entity", ExternalType::Entity}, {"prefab", ExternalType::Prefab}};
+	static const std::unordered_map<std::string, ExternalType> types = {{"number", ExternalType::Number}, {"bool", ExternalType::Bool}, {"string", ExternalType::String}, {"vec3", ExternalType::Vec3}, {"entity", ExternalType::Entity}, {"prefab", ExternalType::Prefab}, {"level", ExternalType::Level}};
 	std::vector<ExternalField> fields;
 	tableIndex_ = lua_absindex(pLua_, tableIndex_);
 	lua_pushnil(pLua_);
@@ -574,7 +574,7 @@ static std::vector<ExternalField> readFields(lua_State* pLua_, int tableIndex_)
 		field.name = lua_tostring(pLua_, -2);
 		if(lua_getfield(pLua_, -1, "type") != LUA_TSTRING) luaL_error(pLua_, "sf.behavior: the field '%s' needs a type.", field.name.c_str());
 		auto type = types.find(lua_tostring(pLua_, -1));
-		if(type == types.end()) luaL_error(pLua_, "sf.behavior: the field '%s' has the unknown type '%s' (number, bool, string, vec3, entity or prefab).", field.name.c_str(), lua_tostring(pLua_, -1));
+		if(type == types.end()) luaL_error(pLua_, "sf.behavior: the field '%s' has the unknown type '%s' (number, bool, string, vec3, entity, prefab or level).", field.name.c_str(), lua_tostring(pLua_, -1));
 		field.type = type->second;
 		lua_pop(pLua_, 1);
 		if(lua_getfield(pLua_, -1, "external") != LUA_TNIL) field.external = lua_toboolean(pLua_, -1) != 0;
@@ -591,6 +591,7 @@ static std::vector<ExternalField> readFields(lua_State* pLua_, int tableIndex_)
 				field.defaultValue.flag = lua_toboolean(pLua_, -1) != 0;
 				break;
 			case ExternalType::String:
+			case ExternalType::Level:
 				field.defaultValue.text = luaL_checkstring(pLua_, -1);
 				break;
 			case ExternalType::Vec3:
@@ -711,7 +712,7 @@ static int registerBoundAreaFunction(lua_State* pLua_, const std::string& rName_
 }
 
 /*
-Registers fn(parent, contact) under a name as an onTouch function of a bound area (BoundAreaFunction): the editor lists it and a bound area's rules name it. The same name again replaces the function behind the
+Registers fn(parent, contact, shape) (shape: see collisionBehavior) under a name as an onTouch function of a bound area (BoundAreaFunction): the editor lists it and a bound area's rules name it. The same name again replaces the function behind the
 same registry reference. An optional third argument {entry = true} makes it run once per entry of a contact (the pair was not touching on the previous tick) instead of every tick. Returns the function, so it can also be used directly in the interactions of sf.collisionBehavior (which then names it by this name).
 */
 static int onTouch(lua_State* pLua_)
@@ -745,8 +746,9 @@ static int tag(lua_State* pLua_)
 }
 
 /*
-Makes a collision behaviour (BABehavior.h) from {tags = {tag, ...}, collidesWith = {tag, ...}, interactions = {[tag] = fn(parent, contact) or {fn, fn, ...}, ...}}; each part may be left out. Returns its handle. An interaction is
-called with the entity that owns the collision (parent) and the one it touched (contact), once per tick and pair.
+Makes a collision behaviour (BABehavior.h) from {tags = {tag, ...}, collidesWith = {tag, ...}, interactions = {[tag] = fn(parent, contact, shape) or {fn, fn, ...}, ...}, fields = "<entity behaviour>"}; each part may be left out. Returns its handle. An interaction is
+called with the entity that owns the collision (parent), the one it touched (contact) and the table of the values of the parent's shape that touched (nil if the parent is a level's triangle), once per tick and pair. fields names an entity behaviour made
+by sf.behavior before (an error otherwise) whose declared fields are the per-shape values: the BoundArea tab shows them under the shape's behaviour, and `shape` has each one (the default if the shape sets none).
 The behaviour's rules are also kept by name (BoundAreaData::scriptBehaviors) so the editor can show and customise it: a function that sf.onTouch registered is named by that name, any other is registered as
 "<behaviour>/<tag>" (with "#2", "#3" ... for a second one of the tag).
 */
@@ -758,6 +760,15 @@ static int collisionBehavior(lua_State* pLua_)
 	BoundAreaBehaviorData data;
 	data.name = pName;
 	const auto& rTagNames = Globals::Game::baTags.names;
+
+	if(lua_getfield(pLua_, 2, "fields") != LUA_TNIL)
+	{
+		const char* pFields = luaL_checkstring(pLua_, -1);
+		if(!Globals::Game::entityBehaviorTypes.nameToId.contains(pFields)) return luaL_error(pLua_, "collisionBehavior %s: fields names the behaviour %s, which is not registered (sf.behavior comes first).", pName, pFields);
+		behavior.fields = pFields;
+		data.fields = pFields;
+	}
+	lua_pop(pLua_, 1);
 
 	if(lua_getfield(pLua_, 2, "tags") == LUA_TTABLE)
 	{
@@ -865,12 +876,21 @@ static PoolId shaderByName(const char* name_)
 }
 
 /*
-Makes a level from Assets/Levels/<name>/<name>.json (Loading::loadMap, see LevelLoader.h) and returns it; the levels the map (Map.json) has beside it are loaded too and are removed by the next call. Without a map entry for the name, one level at a time:
-Emerald Coast and Westopolis would overlap at similar coordinates. The player's start position is the script's to choose (the real start of a stage is not known).
+Makes a level from Assets/Levels/<name>/<name>.json alone (Loading::loadLevelAlone, see LevelLoader.h), at its own origin, and returns it; the levels the last load made beside it are removed. Emerald Coast and Westopolis would overlap at similar coordinates, which is why only one is loaded.
+The player's start position is the script's to choose (the real start of a stage is not known).
 */
 static int loadLevel(lua_State* pLua_)
 {
-	lua_pushinteger(pLua_, toHandle(Loading::loadMap(luaL_checkstring(pLua_, 1))));
+	lua_pushinteger(pLua_, toHandle(Loading::loadLevelAlone(luaL_checkstring(pLua_, 1))));
+	return 1;
+}
+
+/*
+Loads every level of Assets/HubWorld.json, each at its place (Loading::loadHubWorld), and returns the active one: the level named, or the first entry of HubWorld.json when no name is given. The levels the last load made are removed.
+*/
+static int loadHubWorld(lua_State* pLua_)
+{
+	lua_pushinteger(pLua_, toHandle(Loading::loadHubWorld(luaL_optstring(pLua_, 1, ""))));
 	return 1;
 }
 
@@ -922,7 +942,7 @@ static int levelName(lua_State* pLua_)
 static std::vector<PoolId> pendingResets;
 
 /*
-Asks for a level to be destroyed and built again from its recipe (Loading::resetLevel: entities back at their placed state, the same as when the player leaves a map level's bounds). It happens at the start of the next
+Asks for a level to be destroyed and built again from its recipe (Loading::resetLevel: entities back at their placed state, the same as when the player leaves a HubWorld level's bounds). It happens at the start of the next
 gameplay tick, not now, for the reason unloadLevel waits: the script runs inside a tick and the collision system is still reading the entities. Asking twice before that resets it once.
 */
 static int resetLevel(lua_State* pLua_)
@@ -1050,7 +1070,7 @@ void registerAPI(lua_State* pLua_)
 		{"groundNormal", guarded<groundNormal>}, {"groundSurface", guarded<groundSurface>}, {"groundGap", guarded<groundGap>}, {"touchingWall", guarded<touchingWall>}, {"wallNormal", guarded<wallNormal>},
 		{"behavior", guarded<behavior>}, {"give", guarded<give>}, {"prefabBehavior", guarded<prefabBehavior>},
 		{"onTouch", guarded<onTouch>}, {"tag", guarded<tag>}, {"collisionBehavior", guarded<collisionBehavior>}, {"setShapeBehavior", guarded<setShapeBehavior>},
-		{"loadLevel", guarded<loadLevel>}, {"unloadLevel", guarded<unloadLevel>}, {"levelExists", guarded<levelExists>}, {"levels", guarded<levels>}, {"levelName", guarded<levelName>}, {"resetLevel", guarded<resetLevel>}, {"spawnPlayer", guarded<spawnPlayer>}, {"spawn", guarded<spawn>}, {"setCamera", guarded<setCamera>},
+		{"loadLevel", guarded<loadLevel>}, {"loadHubWorld", guarded<loadHubWorld>}, {"unloadLevel", guarded<unloadLevel>}, {"levelExists", guarded<levelExists>}, {"levels", guarded<levels>}, {"levelName", guarded<levelName>}, {"resetLevel", guarded<resetLevel>}, {"spawnPlayer", guarded<spawnPlayer>}, {"spawn", guarded<spawn>}, {"setCamera", guarded<setCamera>},
 		{"include", guarded<include>}, {"rotateBamsZXY", guarded<rotateBamsZXY>},
 		{nullptr, nullptr}
 	};

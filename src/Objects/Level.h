@@ -18,7 +18,7 @@
 
 /*
 How to make one of a level's entities again without building the level (Level::built, Loading::resetLevel). Placed: from the game's data, by spawnPrefab with the params it was first made with (setSAEntities / setONEEntities; the copies of what its params pointed
-at are here: the SET record and a Shadow record's collision keys, the other pointers are into the generated tables, which live for the whole run). Added: an entry of the level file's "source" or "edits" "added" list (fromSource, addedIndex), read again from the file. Camera: an entry of the file's "cameras" list (addedIndex is its place in that list). None: it can't be
+at are here: the SET record and a Shadow record's collision keys, the other pointers are into the generated tables, which live for the whole run). Added: an entry of the level file's "source" or "edits" "added" list (fromSource, addedIndex), read again from the file. Camera: an entry of the file's "cameras" list (addedIndex is its place in that list). Plain: an entry of the file's "entities" list (the same). None: it can't be
 made again alone: a reset that finds such an entity changed rebuilds the whole level.
 */
 struct EntityRecipe
@@ -28,7 +28,8 @@ struct EntityRecipe
 		None,
 		Placed,
 		Added,
-		Camera
+		Camera,
+		Plain
 	};
 	Kind kind = Kind::None;
 	PoolId prefabId = UninitializedPoolId;
@@ -42,7 +43,7 @@ struct EntityRecipe
 };
 
 /*
-The parts of an entity gameplay can change, as the level's build left them (Level::captureBaselines): what Level::entityChanged compares the entity with. The Lua state is not here: Entity::scriptStateDirty says it. The rotation and position are the placed ones (the map's place included).
+The parts of an entity gameplay can change, as the level's build left them (Level::captureBaselines): what Level::entityChanged compares the entity with. The Lua state is not here: Entity::scriptStateDirty says it. The rotation and position are the placed ones (the HubWorld's place included).
 */
 struct EntityBaseline
 {
@@ -108,6 +109,8 @@ struct Level
 	std::map<uint64_t, BuiltEntity> built;
 	uint32_t builtCount = 0;
 	uint32_t sourceEntityCount = 0;
+	/* The indices (below sourceEntityCount) of the source entities the level has removed (the level file's "removed", the editor's Delete): their slot of entityIds stays, as a gone entity, so the indices of the edits and field values do not move, and a reset does not make them again. Emptied by destroyEntities. */
+	std::vector<uint32_t> removed;
 	std::vector<glm::vec3> sourcePositions;
 	/* The rotation and scale of each source entity as made (taken with sourcePositions). */
 	std::vector<glm::mat4> sourceRotations;
@@ -121,14 +124,14 @@ struct Level
 	/* The level's own PoolId in Globals::Game::levels (set by addLevel), so the entities it makes can name it (Entity::levelId) and its prefab edits can be found and dropped (Prefab::inLevels). */
 	PoolId selfId = UninitializedPoolId;
 	/*
-	The level's place in the map (Map.h): its Map.json entry, applied by Loading::loadLevel after the level and its edits are made. A level keeps its own local coordinates: the world position of a point of the level (its file's position included) is mapMatrix() * the point, and
-	the level file's edits are written back in those local coordinates (Loading::saveLevelEdits). mapRotation is Euler angles in degrees, applied as Y, then X, then Z. Identity by default.
+	The level's place in the HubWorld (HubWorld.h): its HubWorld.json entry, applied by Loading::loadLevel after the level and its edits are made. A level keeps its own local coordinates: the world position of a point of the level (its file's position included) is hubWorldMatrix() * the point, and
+	the level file's edits are written back in those local coordinates (Loading::saveLevelEdits). hubWorldRotation is Euler angles in degrees, applied as Y, then X, then Z. Identity by default.
 	*/
-	glm::vec3 mapPosition = glm::vec3(0.0f);
-	glm::vec3 mapRotation = glm::vec3(0.0f);
+	glm::vec3 hubWorldPosition = glm::vec3(0.0f);
+	glm::vec3 hubWorldRotation = glm::vec3(0.0f);
 	/*
-	The box around the level's drawn geometry (the union of the boxes of its pieces' bounding spheres; computeBounds, when the instance is set) in the level's own space, position and map place excluded. hasBounds is false while there is no instance or it has no
-	piece. The editor's Map view picks a level by it (Gizmo).
+	The box around the level's drawn geometry (the union of the boxes of its pieces' bounding spheres; computeBounds, when the instance is set) in the level's own space, position and HubWorld place excluded. hasBounds is false while there is no instance or it has no
+	piece. The editor's HubWorld view picks a level by it (Gizmo).
 	*/
 	glm::vec3 boundsMin = glm::vec3(0.0f);
 	glm::vec3 boundsMax = glm::vec3(0.0f);
@@ -142,18 +145,18 @@ struct Level
 	/* Makes boundsMin / boundsMax from the instance's pieces (a Shadow level's with the yaw its pieces are drawn with, ONELevelInstance::draw). Called by the setXGPUInstance functions. */
 	void computeBounds();
 
-	/* The matrix of mapPosition and mapRotation (translate * Y * X * Z). */
-	glm::mat4 mapMatrix() const;
+	/* The matrix of hubWorldPosition and hubWorldRotation (translate * Y * X * Z). */
+	glm::mat4 hubWorldMatrix() const;
 
 	/*
-	Moves the level to another place in the map: everything it owns goes from the old place to the new one (entities: position and rotation, with the sourcePositions / sourceRotations they are compared with; the collision; the markers it made; the instance
+	Moves the level to another place in the HubWorld: everything it owns goes from the old place to the new one (entities: position and rotation, with the sourcePositions / sourceRotations they are compared with; the collision; the markers it made; the instance
 	is drawn with the matrix). Cameras of its entities move but keep their view direction. Rebuilds the quad tree and marks the spatial index dirty. The same call places a level when it is loaded.
 	*/
-	/* With collision_ false the collision is left where it was (the editor's drag: turning its vertices and rebuilding the quad tree every frame is the cost); collisionStale says it is behind, and commitMapCollision puts it right once. */
-	void setMapTransform(const glm::vec3& rPosition_, const glm::vec3& rRotationDegrees_, bool collision_ = true);
+	/* With collision_ false the collision is left where it was (the editor's drag: turning its vertices and rebuilding the quad tree every frame is the cost); collisionStale says it is behind, and commitHubWorldCollision puts it right once. */
+	void setHubWorldTransform(const glm::vec3& rPosition_, const glm::vec3& rRotationDegrees_, bool collision_ = true);
 	bool collisionStale = false;
-	void commitMapCollision();
-	/* Puts the collision where the level's place says (turned by mapRotation, at mapPosition + that turn of position), without rebuilding the quad tree. */
+	void commitHubWorldCollision();
+	/* Puts the collision where the level's place says (turned by hubWorldRotation, at hubWorldPosition + that turn of position), without rebuilding the quad tree. */
 	void placeCollision();
 	void setONEEntities(PoolId shaderId_, const STH2005::LevelKey& rLevel_);
 	void setSAEntities(PoolId shaderId_, const SALandTableKey& rLandTable_);
@@ -191,6 +194,10 @@ struct Level
 
 	/* The prefabs (Globals::Game::prefabs) the level's entities hold in prefab fields (ExternalValue::prefab) that still exist, each once: they belong to the level for the editor's Level folders although no entity is made from them yet. */
 	std::vector<PoolId> referencedPrefabs() const;
+
+	/* Removes the source entity of that index from the pool and records it in removed (an index at or after sourceEntityCount is ignored). */
+	void removeSourceEntity(uint32_t index_);
+	bool isRemoved(uint32_t index_) const;
 
 	/* Puts a level's own entity back where the game's data has it. */
 	void revertSourceEntity(uint32_t index_);

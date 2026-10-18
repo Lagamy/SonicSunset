@@ -501,6 +501,40 @@ void pushEntityState(lua_State* pLua_, PoolId entityId_)
 	}
 }
 
+/* Pushes the value of a declared field on the Lua stack as its type says: a number, bool, string, vec3 table, entity handle (sf.none if it is gone) or prefab name (nil if it is gone). */
+static void pushExternalValue(const ExternalField& rField_, const ExternalValue& rValue_)
+{
+	switch(rField_.type)
+	{
+	case ExternalType::Number:
+		lua_pushnumber(pState, rValue_.number);
+		break;
+	case ExternalType::Bool:
+		lua_pushboolean(pState, rValue_.flag);
+		break;
+	case ExternalType::String:
+		lua_pushstring(pState, rValue_.text.c_str());
+		break;
+	case ExternalType::Vec3:
+		pushVector(rValue_.vector.x, rValue_.vector.y, rValue_.vector.z);
+		break;
+	case ExternalType::Entity:
+		lua_pushinteger(pState, entityExists(rValue_.entity) ? entityHandle(rValue_.entity) : toHandle(UninitializedPoolId));
+		break;
+	case ExternalType::Prefab:
+	{
+		PoolId prefabId = rValue_.prefab;
+		if(prefabId.id < Globals::Game::prefabs.objects.size() && Globals::Game::prefabs.alive[prefabId.id] && Globals::Game::prefabs.generation[prefabId.id] == prefabId.generation) lua_pushstring(pState, Globals::Game::prefabs.names[prefabId.id].c_str());
+		else lua_pushnil(pState);
+		break;
+	}
+	case ExternalType::Level:
+		if(rValue_.text.empty()) lua_pushnil(pState);
+		else lua_pushstring(pState, rValue_.text.c_str());
+		break;
+	}
+}
+
 /*
 Writes the declared fields (EntityBehavior::fields) of a behaviour into the entity's sf.state table, once per entity and behaviour: the value the editor set (Entity::externals) or the declared default. An entity that is gone (a reference
 to it was kept) or a prefab that is gone reads as sf.none (-1) / nil. An entity's state table is made here if it has none yet, as sf.state does.
@@ -529,31 +563,7 @@ static bool applyFields(PoolId entityId_, PoolId behaviorId_)
 			auto found = pSet->find(rField.name);
 			if(found != pSet->end()) pValue = &found->second;
 		}
-		switch(rField.type)
-		{
-		case ExternalType::Number:
-			lua_pushnumber(pState, pValue->number);
-			break;
-		case ExternalType::Bool:
-			lua_pushboolean(pState, pValue->flag);
-			break;
-		case ExternalType::String:
-			lua_pushstring(pState, pValue->text.c_str());
-			break;
-		case ExternalType::Vec3:
-			pushVector(pValue->vector.x, pValue->vector.y, pValue->vector.z);
-			break;
-		case ExternalType::Entity:
-			lua_pushinteger(pState, entityExists(pValue->entity) ? entityHandle(pValue->entity) : toHandle(UninitializedPoolId));
-			break;
-		case ExternalType::Prefab:
-		{
-			PoolId prefabId = pValue->prefab;
-			if(prefabId.id < Globals::Game::prefabs.objects.size() && Globals::Game::prefabs.alive[prefabId.id] && Globals::Game::prefabs.generation[prefabId.id] == prefabId.generation) lua_pushstring(pState, Globals::Game::prefabs.names[prefabId.id].c_str());
-			else lua_pushnil(pState);
-			break;
-		}
-		}
+		pushExternalValue(rField, *pValue);
 		lua_setfield(pState, -2, rField.name.c_str());
 	}
 	lua_pop(pState, 1);
@@ -580,13 +590,39 @@ void callBehavior(int scriptFunction_, PoolId entityId_, PoolId behaviorId_)
 	setupEntity = outerEntity;
 }
 
-void callInteraction(int scriptFunction_, PoolId parentEntity_, PoolId contactEntity_)
+void callInteraction(int scriptFunction_, PoolId parentEntity_, PoolId contactEntity_, int parentShape_)
 {
 	if(pState == nullptr || failed.contains(scriptFunction_)) return;
 	lua_rawgeti(pState, LUA_REGISTRYINDEX, scriptFunction_);
 	lua_pushinteger(pState, entityHandle(parentEntity_));
 	lua_pushinteger(pState, entityHandle(contactEntity_));
-	if(!protectedCall(2, 0))
+
+	/* The third argument: the values of the parent's shape that touched, every field its behaviour declares (the value the shape sets, else the default); nil for a level's triangle or a shape that is gone (an earlier callback of the tick may have changed the entity). */
+	const Physics::CollisionShape* pShape = nullptr;
+	if(parentShape_ >= 0 && entityExists(parentEntity_))
+	{
+		const Entity& rParent = Globals::Game::entities[parentEntity_];
+		if(rParent.collisionId != UninitializedPoolId)
+		{
+			const std::vector<Physics::CollisionShape>& rShapes = Globals::Physics::collisions[rParent.collisionId].shapes;
+			if(static_cast<size_t>(parentShape_) < rShapes.size()) pShape = &rShapes[parentShape_];
+		}
+	}
+	if(pShape == nullptr)
+	{
+		lua_pushnil(pState);
+	}
+	else
+	{
+		lua_newtable(pState);
+		for(const ExternalField& rField : Globals::Game::baBehaviors.fieldsOf(pShape->behavior))
+		{
+			auto set = pShape->values.find(rField.name);
+			pushExternalValue(rField, set != pShape->values.end() ? set->second : rField.defaultValue);
+			lua_setfield(pState, -2, rField.name.c_str());
+		}
+	}
+	if(!protectedCall(3, 0))
 	{
 		failed.insert(scriptFunction_);
 		reportError("that interaction is switched off.");
@@ -666,8 +702,8 @@ void attachPlayer(PoolId entityId_)
 	protectedCall(1, 0);
 }
 
-/* One call of the script's resetGame(unloaded_, levelName_), if it defines one (levelName_ nil = the same level). */
-static void callResetHook(bool unloaded_, const char* pLevelName_)
+/* One call of the script's resetGame(unloaded_, levelName_, mode_), if it defines one (levelName_ nil = the same level; mode_ nil = the same kind of load, "level" or "hub" = that one). */
+static void callResetHook(bool unloaded_, const char* pLevelName_, const char* pMode_)
 {
 	lua_getglobal(pState, "resetGame");
 	if(!lua_isfunction(pState, -1))
@@ -678,15 +714,17 @@ static void callResetHook(bool unloaded_, const char* pLevelName_)
 	lua_pushboolean(pState, unloaded_);
 	if(pLevelName_ != nullptr) lua_pushstring(pState, pLevelName_);
 	else lua_pushnil(pState);
-	protectedCall(2, 0);
+	if(pMode_ != nullptr) lua_pushstring(pState, pMode_);
+	else lua_pushnil(pState);
+	protectedCall(3, 0);
 }
 
-void resetGame(const char* pLevelName_)
+void resetGame(const char* pLevelName_, const char* pMode_)
 {
 	if(pState == nullptr) return;
-	callResetHook(false, pLevelName_);
+	callResetHook(false, pLevelName_, pMode_);
 	processPendingUnloads();
-	callResetHook(true, pLevelName_);
+	callResetHook(true, pLevelName_, pMode_);
 }
 
 void releaseState(int stateRef_)

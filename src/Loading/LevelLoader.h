@@ -17,18 +17,25 @@ namespace Loading
     PoolId loadLevel(const std::string& name_);
 
     /*
-    The map's load (Map.h): removes the levels the last loadMap loaded beside its active one, loads the level named, makes it the map's active level (Map::active), and, when the map has an entry for it, loads every other level of the map too, each in its place (loadLevel
-    gives a level its place). A level that fails is on stderr and skipped; the named one failing throws like loadLevel. Returns the named level. What the scripts' sf.loadLevel and the editor's Load level / Stop use.
+    Removes the levels the last load made beside its active one, then loads the level named alone: at its own origin, with no HubWorld place, and makes it the active level (HubWorld::active, loadedAsHub false). Throws like loadLevel. What the scripts' sf.loadLevel and the editor's Load level use.
     */
-    PoolId loadMap(const std::string& activeName_);
+    PoolId loadLevelAlone(const std::string& name_);
 
     /*
-    Puts a loaded level back as its files have it, in place (the same PoolId, so scripts' handles stay valid): the level's entities are destroyed and made again from its recipe with its file's edits and its place in the map; its instance and collision are kept (not made again). In the editor, while playing, the editor's state kept at Play
+    The HubWorld's load (HubWorld.h): removes the levels the last load made beside its active one, then loads every level of HubWorld.json, each at its place (loadedAsHub true: loadLevel gives a level its place), and makes the HubWorld's own entities (HubWorld.json "entities"; both loads remove them first). The active level is the one named (empty = the first entry of HubWorld.json) and is returned. A level that fails is on stderr and skipped; the active one failing throws like loadLevel, and so does a HubWorld with no levels. What the scripts' sf.loadHubWorld and the editor's Load HubWorld / Choose as active use.
+    */
+    PoolId loadHubWorld(const std::string& activeName_);
+
+    /*
+    Puts a loaded level back as its files have it, in place (the same PoolId, so scripts' handles stay valid): the level's entities are destroyed and made again from its recipe with its file's edits and its place in the HubWorld; its instance and collision are kept (not made again). In the editor, while playing, the editor's state kept at Play
     is put on it (Editor::restoreKeptLevel); a build without the editor reads the files again and has no edits to keep. Nothing calls it by itself: a script does, through sf.resetLevel. A failure is on stderr and leaves the level without entities.
     */
     void resetLevel(PoolId levelId_);
 
 #ifdef EDITOR
+    /* Copies the live entities the HubWorld owns (HubWorld::entityIds) into HubWorld::entities, which HubWorld::write saves. */
+    void syncHubWorldEntities();
+
     /*
     Writes the prefab's Changed file (Assets/External/Prefabs/<prefab name>/Changed/prefab.json, and External/Prefabs/... of the source tree) from Prefab::changed, or removes it when that is empty. Called by the prefab edit functions (Prefab.h) after a Global edit.
     Throws std::runtime_error if a file can't be written.

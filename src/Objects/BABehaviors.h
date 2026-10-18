@@ -2,6 +2,7 @@
 #include "BAKeys.h"
 #include "BABehavior.h"
 #include "Constants.h"
+#include "ExternalField.h"
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -26,7 +27,7 @@ struct BARemap
 The bound area rules the editor makes (External/Collision/BoundAreas.json, read after the scripts by BABehaviors::loadBoundAreas), kept by name so a function that is not registered (its script is gone) keeps its entry:
 - tags: the tags made by the file (a tag is only a name).
 - behaviors: name; tags (what it is); collidesWith (the tags it is stopped by, BABehavior::availableCollisions); onTouch: a list of {function, tags}: the named onTouch function (Globals::Game::boundAreaFunctions) and
-  the tags whose overlap calls it (BABehavior::availableInteractions: each tag gets the function in its list).
+  the tags whose overlap calls it (BABehavior::availableInteractions: each tag gets the function in its list); fields: the entity behaviour that declares the per-shape values (BABehavior::fields), empty = none.
 A behaviour code made is kept as well (scriptBehaviors, never saved): the built-in ones (init) and the ones a script made with sf.collisionBehavior, whose functions get registered names ("<behaviour>/<tag>") so the editor can
 show them. Customising one copies it into behaviors under the same name: the file's entry then replaces the code's rules at the next start, and reverting removes the copy. Only the behaviours in behaviors are edited, renamed or deleted.
 */
@@ -42,6 +43,7 @@ struct BoundAreaBehaviorData
 	std::vector<std::string> tags;
 	std::vector<std::string> collidesWith;
 	std::vector<BoundAreaRule> onTouch;
+	std::string fields;
 };
 
 struct BoundAreaData
@@ -95,7 +97,7 @@ struct BABehaviors
 	BoundAreaData boundAreas;
 
 	/*
-	Reads External/Collision/BoundAreas.json ({"tags": [name], "behaviors": [{"name", "tags": [name], "collidesWith": [name], "onTouch": [{"function": name, "tags": [name]}]}]}): makes the tags and the behaviours.
+	Reads External/Collision/BoundAreas.json ({"tags": [name], "behaviors": [{"name", "tags": [name], "collidesWith": [name], "onTouch": [{"function": name, "tags": [name]}], "fields": entity behaviour name (optional)}]}): makes the tags and the behaviours.
 	Once, after the scripts are loaded (the function names are looked up now); a missing file is nothing to read. Throws std::runtime_error if the file is wrong, a tag name is unknown or a behaviour name is taken.
 	A function that is not registered is left out of the behaviour (printed on stderr), its entry stays in boundAreas.
 	*/
@@ -122,6 +124,9 @@ struct BABehaviors
 
 	/* The original rules of a behaviour name, nullptr if it is neither built in nor made by a script (init and sf.collisionBehavior keep them in boundAreas.scriptBehaviors). */
 	const BoundAreaBehaviorData* scriptBehaviorNamed(const std::string& rName_) const;
+
+	/* The fields that describe the per-shape values of a collision behaviour (the declared fields of the entity behaviour BABehavior::fields names); empty if it names none, the behaviour is none or the name is not registered. */
+	const std::vector<ExternalField>& fieldsOf(PoolId behaviorId_) const;
 
 	/* Adds a tag / a behaviour (empty rules) to boundAreas and the pools; throws if the name is empty or taken. Returns the index of the behaviour. */
 	PoolId addBoundAreaTag(const std::string& rName_);

@@ -103,7 +103,7 @@ int main() {
 	registerPrefabs();
 	/* Their groups and the Shadow objects' placement layouts (Assets/External/Prefabs/Groups.json, STH2005/Placement.json). */
 	Loading::loadPrefabData();
-	Globals::Game::map.read();
+	Globals::Game::hubWorld.read();
 	/* The prefabs' Changed files (Assets/External/Prefabs/<game>/<KEY>/Changed/prefab.json) name behaviours, so after the scripts. */
 	Loading::loadChangedPrefabs();
 #ifdef EDITOR

@@ -136,33 +136,39 @@ void Editor::saveAllLevels()
 			failed += " " + rName + " (" + rError.what() + ")";
 		}
 	}
-	std::string mapNote;
-	if(this->mapUnsaved)
+	/* The HubWorld's entities are moved by the gizmo and the Inspector like any entity, so what they are now is compared with what the file has. */
+	std::vector<HubWorldEntity> savedEntities = Globals::Game::hubWorld.entities;
+	Loading::syncHubWorldEntities();
+	if(savedEntities != Globals::Game::hubWorld.entities) this->hubWorldUnsaved = true;
+	std::string hubWorldNote;
+	if(this->hubWorldUnsaved)
 	{
 		try
 		{
-			Globals::Game::map.write();
-			this->mapUnsaved = false;
-			mapNote = " Wrote Map.json.";
+			Globals::Game::hubWorld.write();
+			this->hubWorldUnsaved = false;
+			hubWorldNote = " Wrote HubWorld.json.";
 		}
 		catch(const std::exception& rError)
 		{
-			mapNote = std::string(" Map.json not written: ") + rError.what();
+			hubWorldNote = std::string(" HubWorld.json not written: ") + rError.what();
 		}
 	}
-	if(saved == 0 && failed.empty() && mapNote.empty()) this->fileMessage = "Nothing saved: no level loaded.";
-	else this->fileMessage = std::format("Saved {} changed level(s).", saved) + (failed.empty() ? std::string() : " Save failed:" + failed) + mapNote;
+	if(saved == 0 && failed.empty() && hubWorldNote.empty()) this->fileMessage = "Nothing saved: no level loaded.";
+	else this->fileMessage = std::format("Saved {} changed level(s).", saved) + (failed.empty() ? std::string() : " Save failed:" + failed) + hubWorldNote;
 }
 
 void Editor::clearKept()
 {
 	this->keptLevels.clear();
+	this->keptHubWorld.clear();
+	this->keptHubWorldIds.clear();
 }
 
 namespace
 {
-/* The editable state of one entity, as setPlaying keeps it (Editor::KeptEntity). The entities its external fields refer to are kept as their index in the level (Level::editIndexOf): the level is made again at Stop. */
-Editor::KeptEntity keptEntityOf(const Entity& rEntity_, const Level& rLevel_)
+/* The editable state of one entity, as setPlaying keeps it (Editor::KeptEntity). The entities its external fields and its shapes' values refer to are kept as their index in the level (Level::editIndexOf): the level is made again at Stop. A HubWorld entity has no level (pLevel_ null): an entity value is kept as none. */
+Editor::KeptEntity keptEntityOf(const Entity& rEntity_, const Level* pLevel_)
 {
 	Editor::KeptEntity kept;
 	kept.position = rEntity_.position;
@@ -179,7 +185,16 @@ Editor::KeptEntity keptEntityOf(const Entity& rEntity_, const Level& rLevel_)
 		for(auto& [fieldName, rValue] : rValues)
 		{
 			if(rValue.entity == UninitializedPoolId) continue;
-			rValue.entityIndex = rLevel_.editIndexOf(rValue.entity);
+			rValue.entityIndex = pLevel_ ? pLevel_->editIndexOf(rValue.entity) : -1;
+			rValue.entity = UninitializedPoolId;
+		}
+	}
+	for(Physics::CollisionShape& rShape : kept.shapes)
+	{
+		for(auto& [fieldName, rValue] : rShape.values)
+		{
+			if(rValue.entity == UninitializedPoolId) continue;
+			rValue.entityIndex = pLevel_ ? pLevel_->editIndexOf(rValue.entity) : -1;
 			rValue.entity = UninitializedPoolId;
 		}
 	}
@@ -272,14 +287,107 @@ void Editor::recordCreated(PoolId entityId_)
 	this->entityList.selectedFolder = -1;
 }
 
+bool Editor::inHubWorldList(const Entity& rEntity_) const
+{
+	return rEntity_.hubWorldOwned || (Globals::Game::hubWorld.loadedAsHub && rEntity_.levelId == UninitializedPoolId);
+}
+
+void Editor::adoptEntity(PoolId entityId_, bool hubWorld_, PoolId levelId_)
+{
+	if(hubWorld_)
+	{
+		getEntity(entityId_).hubWorldOwned = true;
+		Globals::Game::hubWorld.entityIds.push_back(entityId_);
+		this->hubWorldUnsaved = true;
+		return;
+	}
+	PoolId levelId = levelId_ != UninitializedPoolId ? levelId_ : this->currentLevel();
+	if(levelId != UninitializedPoolId)
+	{
+		getEntity(entityId_).levelId = levelId;
+		getLevel(levelId).entityIds.push_back(entityId_);
+	}
+}
+
+/*
+The owner's list loses the entity. A slot of Level::entityIds from the build (before builtCount) stays as a gone entity, whose index the file's edits and external values count by: a level's own entity is recorded as removed (Level::removeSourceEntity, saved as the file's "removed") and no reset makes it again, an "added" entry of the file is made again by the level's reset like one that could not be made; a slot the editor added after them is erased.
+*/
+void Editor::removeEntity(PoolId entityId_)
+{
+	if(!entityExists(entityId_)) return;
+	const Entity& rEntity = getEntity(entityId_);
+	if(rEntity.hubWorldOwned)
+	{
+		/* A HubWorld camera's render target was made for it (the file's or the editor's), and removing the entity does not free it. */
+		if(rEntity.cameraId != UninitializedPoolId)
+		{
+			PoolId targetId = Globals::Game::cameras[rEntity.cameraId].renderTargetId;
+			Pool<Graphics::RenderTarget>& rTargets = Globals::Game::renderTargets;
+			if(targetId != UninitializedPoolId && targetId.id < rTargets.alive.size() && rTargets.alive[targetId.id] && rTargets.generation[targetId.id] == targetId.generation) rTargets.remove(targetId);
+		}
+		std::erase(Globals::Game::hubWorld.entityIds, entityId_);
+		this->hubWorldUnsaved = true;
+	}
+	else
+	{
+		PoolId levelId = rEntity.levelId != UninitializedPoolId && Globals::Game::levels.alive[rEntity.levelId.id] ? rEntity.levelId : this->currentLevel();
+		if(levelId != UninitializedPoolId)
+		{
+			Level& rLevel = getLevel(levelId);
+			int32_t sourceIndex = rLevel.sourceIndexOf(entityId_);
+			if(sourceIndex >= 0)
+			{
+				rLevel.removeSourceEntity(static_cast<uint32_t>(sourceIndex));
+				return;
+			}
+			for(uint32_t i = rLevel.builtCount; i < rLevel.entityIds.size();)
+			{
+				if(rLevel.entityIds[i] == entityId_) rLevel.entityIds.erase(rLevel.entityIds.begin() + i);
+				else i++;
+			}
+		}
+	}
+	Globals::Game::entities.remove(entityId_);
+	Globals::Game::spatialIndex.dirty = true;
+}
+
+void Editor::deleteSelected()
+{
+	std::vector<PoolId> ids = this->entityList.selection();
+	if(ids.empty()) return;
+	int removed = 0;
+	int refused = 0;
+	for(PoolId id : ids)
+	{
+		if(!entityExists(id)) continue;
+		const Entity& rEntity = getEntity(id);
+
+		/* Only an entity something owns can go: the HubWorld's, or a level's (a level's own entity is saved in the level file's "removed"). The main camera and the players belong to the scripts. */
+		bool deletable = rEntity.hubWorldOwned || (rEntity.levelId != UninitializedPoolId && Globals::Game::levels.alive[rEntity.levelId.id]);
+		Clipboard snapshot;
+		if(deletable) snapshot = this->snapshotOf(id);
+		if(!snapshot.valid)
+		{
+			refused++;
+			continue;
+		}
+		this->removeEntity(id);
+		this->pushUndo({true, id, Transform(), snapshot});
+		removed++;
+	}
+	this->entityList.selectOnly(UninitializedPoolId);
+	if(removed > 0) this->fileMessage = std::format("Deleted {} entit{} (Ctrl+Z brings back).", removed, removed == 1 ? "y" : "ies") + (refused > 0 ? std::format(" {} not deleted: not copyable (a player) or owned by no one (the main camera).", refused) : std::string());
+	else this->fileMessage = "Nothing deleted: the entity is not copyable (a player) or owned by no one (the main camera).";
+}
+
 /*
 A step is the selected entities' transforms before a change that the user made: the gizmo drag or an inspector widget being held (ImGui::IsAnyItemActive) is "busy", and the first idle frame after a busy one compares the transforms with the ones seen before it, so a whole drag is one step. Any other change
 (the collision system pushing an entity out of an overlap in the editor) is taken as the new baseline without a step, otherwise undoing would be followed by a push-out that is recorded again and never gets past. One changed entity is a plain step; several (a group drag) are one group step.
 */
 void Editor::trackTransform()
 {
-	/* In the Map view an entity moves with its level, not by the user: no entity step, the levels' places are tracked instead, and the entities' baseline is taken again when the Level view is back. */
-	if(this->mapView)
+	/* In the HubWorld view an entity moves with its level, not by the user: no entity step, the levels' places are tracked instead, and the entities' baseline is taken again when the Level view is back. */
+	if(this->hubWorldView)
 	{
 		this->tracked.clear();
 		this->trackedBusy = false;
@@ -325,13 +433,13 @@ void Editor::trackTransform()
 	this->trackedBusy = false;
 }
 
-/* The Map view's counterpart of trackTransform: the places (position, rotation) of the selected levels; a step holds the places of the levels that changed. */
+/* The HubWorld view's counterpart of trackTransform: the places (position, rotation) of the selected levels; a step holds the places of the levels that changed. */
 void Editor::trackPlaces()
 {
-	std::vector<MapLevel> current;
-	for(const std::string& rName : this->mapSelection())
+	std::vector<HubWorldLevel> current;
+	for(const std::string& rName : this->hubWorldSelection())
 	{
-		MapLevel place;
+		HubWorldLevel place;
 		if(this->levelPlace(rName, place)) current.push_back(place);
 	}
 	bool same = !current.empty() && current.size() == this->trackedPlaces.size();
@@ -361,19 +469,18 @@ void Editor::trackPlaces()
 }
 
 /*
-Does one step and puts its opposite on rOpposite_ (undo: the redo stack, redo: the undo stack). A transform step gives the entity the stored transform and stores the one it had; a group step does so for each entity of the group that still exists; a map step gives each level its stored place (by name)
+Does one step and puts its opposite on rOpposite_ (undo: the redo stack, redo: the undo stack). A transform step gives the entity the stored transform and stores the one it had; a group step does so for each entity of the group that still exists; a HubWorld step gives each level its stored place (by name)
 and stores the one it had. A created step removes the entity from its level and the pool (Level::restoreSource does the same for added entities), keeping its state; the opposite
 (a created step with a state) makes it again, and the entity has a new PoolId then, so the steps of both stacks that name the old one are changed to the new. The caller skips a step whose entity is gone.
 */
 void Editor::applyAction(const UndoAction& rAction_, std::vector<UndoAction>& rOpposite_)
 {
-	PoolId levelId = this->currentLevel();
 	if(!rAction_.places.empty())
 	{
 		UndoAction opposite{false, UninitializedPoolId, Transform(), Clipboard()};
-		for(const MapLevel& rPlace : rAction_.places)
+		for(const HubWorldLevel& rPlace : rAction_.places)
 		{
-			MapLevel now;
+			HubWorldLevel now;
 			if(!this->levelPlace(rPlace.name, now)) continue;
 			opposite.places.push_back(now);
 			this->setLevelPlace(rPlace);
@@ -430,10 +537,8 @@ void Editor::applyAction(const UndoAction& rAction_, std::vector<UndoAction>& rO
 	if(rAction_.created)
 	{
 		Clipboard snapshot = this->snapshotOf(rAction_.entity);
-		if(levelId != UninitializedPoolId) std::erase(getLevel(levelId).entityIds, rAction_.entity);
 		if(this->entityList.selected == rAction_.entity) this->entityList.selectOnly(UninitializedPoolId);
-		Globals::Game::entities.remove(rAction_.entity);
-		Globals::Game::spatialIndex.dirty = true;
+		this->removeEntity(rAction_.entity);
 		rOpposite_.push_back({true, rAction_.entity, Transform(), snapshot});
 		return;
 	}
@@ -451,7 +556,7 @@ void Editor::applyAction(const UndoAction& rAction_, std::vector<UndoAction>& rO
 
 namespace
 {
-/* Whether a step can still be done: a map step always (levels not loaded are skipped when it is applied), a group step while one of its entities exists, a created step on the redo stack while it has a state to make the entity from, any other while its entity exists. */
+/* Whether a step can still be done: a HubWorld step always (levels not loaded are skipped when it is applied), a group step while one of its entities exists, a created step with a state to make the entity from (the redo of a create, the undo of a delete), any other while its entity exists. */
 bool stepPossible(const Editor::UndoAction& rAction_, bool redo_)
 {
 	if(!rAction_.places.empty()) return true;
@@ -463,6 +568,7 @@ bool stepPossible(const Editor::UndoAction& rAction_, bool redo_)
 		}
 		return false;
 	}
+	if(rAction_.created && rAction_.snapshot.valid) return true;
 	if(redo_ && rAction_.created) return rAction_.snapshot.valid;
 	return entityExists(rAction_.entity);
 }
@@ -504,7 +610,7 @@ void Editor::redo()
 	this->fileMessage = "Nothing to redo.";
 }
 
-/* A prefab entity keeps its prefab and Editor::KeptEntity (the state Stop keeps); a camera entity keeps the camera's own settings. A player or an entity of neither kind (no prefab, no camera) gives an invalid copy: a second player would not be a copy of the first; reason in fileMessage. */
+/* A prefab entity keeps its prefab and Editor::KeptEntity (the state Stop keeps); a camera entity keeps the camera's own settings. An entity with neither (Add empty entity) keeps its state as a plain one. A player gives an invalid copy: a second player would not be a copy of the first; reason in fileMessage. */
 Editor::Clipboard Editor::snapshotOf(PoolId entityId_)
 {
 	Clipboard copy;
@@ -516,6 +622,7 @@ Editor::Clipboard Editor::snapshotOf(PoolId entityId_)
 	}
 	const Entity& rEntity = getEntity(entityId_);
 	copy.name = Globals::Game::entities.names[entityId_.id];
+	copy.hubWorld = rEntity.hubWorldOwned;
 	if(rEntity.cameraId != UninitializedPoolId)
 	{
 		const Camera& rCamera = Globals::Game::cameras[rEntity.cameraId];
@@ -524,7 +631,7 @@ Editor::Clipboard Editor::snapshotOf(PoolId entityId_)
 		const Graphics::RenderTarget* pTarget = rCamera.renderTarget();
 		copy.camera = {rCamera.front, rCamera.yaw, rCamera.pitch, rCamera.fov, rCamera.nearPlane, rCamera.farPlane, rCamera.speed, rCamera.speedUp, rCamera.enabled, Globals::Game::mainCamera == rEntity.cameraId, pTarget != nullptr ? pTarget->width : 0u, pTarget != nullptr ? pTarget->height : 0u};
 	}
-	else if(rEntity.prefabId != UninitializedPoolId && levelId != UninitializedPoolId)
+	else if(rEntity.prefabId != UninitializedPoolId && (levelId != UninitializedPoolId || rEntity.hubWorldOwned))
 	{
 		PrefabKind kind = Globals::Game::prefabs[rEntity.prefabId].kind;
 		if(kind == PrefabKind::SonicPlayer || kind == PrefabKind::ShadowPlayer)
@@ -533,11 +640,16 @@ Editor::Clipboard Editor::snapshotOf(PoolId entityId_)
 			return copy;
 		}
 		copy.prefabId = rEntity.prefabId;
-		copy.entity = keptEntityOf(rEntity, getLevel(levelId));
+		copy.entity = keptEntityOf(rEntity, rEntity.hubWorldOwned ? nullptr : &getLevel(levelId));
+	}
+	else if(levelId != UninitializedPoolId || rEntity.hubWorldOwned)
+	{
+		copy.isPlain = true;
+		copy.entity = keptEntityOf(rEntity, rEntity.hubWorldOwned ? nullptr : &getLevel(levelId));
 	}
 	else
 	{
-		this->fileMessage = "Nothing copied: the entity has no prefab and no camera.";
+		this->fileMessage = "Nothing copied: no level is open.";
 		return copy;
 	}
 	copy.valid = true;
@@ -553,9 +665,14 @@ void Editor::copySelected()
 	this->fileMessage = "Copied " + this->clipboard.name;
 }
 
-PoolId Editor::addLevelCamera(const char* name_, const glm::vec3& rPosition_, PoolId levelId_)
+PoolId Editor::addLevelCamera(const char* name_, const glm::vec3& rPosition_, PoolId levelId_, bool hubWorld_)
 {
 	PoolId id = addCamera(name_, rPosition_);
+	if(hubWorld_)
+	{
+		this->adoptEntity(id, true);
+		return id;
+	}
 	PoolId levelId = levelId_ != UninitializedPoolId ? levelId_ : this->currentLevel();
 	if(levelId != UninitializedPoolId)
 	{
@@ -565,12 +682,12 @@ PoolId Editor::addLevelCamera(const char* name_, const glm::vec3& rPosition_, Po
 	return id;
 }
 
-/* Makes an entity from a copy at a position: a camera entity with the copy's settings, or an entity of its prefab that the level owns from then on (like an entity of the prefab panel), given the copy's transform, behaviours, shapes, model, texture and field values. UninitializedPoolId if it can't (the reason is on stderr or in fileMessage). */
+/* Makes an entity from a copy at a position: a camera entity with the copy's settings, a plain entity with the copy's state, or an entity of its prefab that the level owns from then on (like an entity of the prefab panel), given the copy's transform, behaviours, shapes, model, texture and field values. UninitializedPoolId if it can't (the reason is on stderr or in fileMessage). */
 PoolId Editor::spawnFrom(const Clipboard& rCopy_, const glm::vec3& rPosition_, PoolId levelId_)
 {
 	if(rCopy_.isCamera)
 	{
-		PoolId id = this->addLevelCamera(rCopy_.name.c_str(), rPosition_, levelId_);
+		PoolId id = this->addLevelCamera(rCopy_.name.c_str(), rPosition_, levelId_, rCopy_.hubWorld);
 		Camera& rCamera = Globals::Game::cameras[getEntity(id).cameraId];
 		const CopiedCamera& rSettings = rCopy_.camera;
 		rCamera.front = rSettings.front;
@@ -589,25 +706,34 @@ PoolId Editor::spawnFrom(const Clipboard& rCopy_, const glm::vec3& rPosition_, P
 		return id;
 	}
 	PoolId levelId = levelId_ != UninitializedPoolId ? levelId_ : this->currentLevel();
-	if(levelId == UninitializedPoolId) return UninitializedPoolId;
+	if(levelId == UninitializedPoolId && !rCopy_.hubWorld) return UninitializedPoolId;
+	if(rCopy_.isPlain)
+	{
+		PoolId id = addEntity(rCopy_.name.c_str(), rPosition_);
+		this->adoptEntity(id, rCopy_.hubWorld, levelId);
+		KeptEntity kept = rCopy_.entity;
+		kept.position = rPosition_;
+		giveKeptEntity(id, kept);
+		if(!rCopy_.hubWorld) getLevel(levelId).resolveExternalEntities();
+		return id;
+	}
 	const Prefab& rPrefab = Globals::Game::prefabs[rCopy_.prefabId];
 	SpawnParams params;
 	params.position = rPosition_;
 	params.name = rCopy_.name;
 	params.what = "(editor)";
-	params.levelId = levelId;
+	params.levelId = rCopy_.hubWorld ? UninitializedPoolId : levelId;
 	PoolId id = spawnPrefab(rCopy_.prefabId, Graphics::getShaderId(rPrefab.game == SA_NINJA ? "SA" : "STH2005"), params);
 	if(id == UninitializedPoolId)
 	{
 		this->fileMessage = "Could not make " + rCopy_.name + ", see the log.";
 		return id;
 	}
-	Level& rLevel = getLevel(levelId);
-	rLevel.entityIds.push_back(id);
+	this->adoptEntity(id, rCopy_.hubWorld, levelId);
 	KeptEntity kept = rCopy_.entity;
 	kept.position = rPosition_;
 	giveKeptEntity(id, kept);
-	rLevel.resolveExternalEntities();
+	if(!rCopy_.hubWorld) getLevel(levelId).resolveExternalEntities();
 	return id;
 }
 
@@ -626,128 +752,155 @@ void Editor::pasteAtCursor()
 	glfwGetCursorPos(pWindow, &cursorX, &cursorY);
 	glm::vec3 point;
 	if(!this->debugUI.wantsMouse() && Graphics::pickPlanePoint(pWindow, this->camera, cursorX, cursorY, position.y, point)) position = point;
-	PoolId id = this->spawnFrom(this->clipboard, position);
+	/* A plain or prefab copy goes to the owner of the tab in use: the HubWorld in its Entities subtab, else the level. */
+	Clipboard copy = this->clipboard;
+	copy.hubWorld = this->hubWorldEntities;
+	PoolId id = this->spawnFrom(copy, position);
 	if(id == UninitializedPoolId) return;
 	this->recordCreated(id);
 	this->fileMessage = "Pasted " + this->clipboard.name;
 }
 
-void Editor::loadLevel(const std::string& levelName_)
+void Editor::loadLevel(const std::string& levelName_, const char* pMode_)
 {
 	this->entityList.selectOnly(UninitializedPoolId);
 	this->clearKept();
 	this->clearUndo();
-	Scripting::resetGame(levelName_.c_str());
+	Scripting::resetGame(levelName_.c_str(), pMode_);
 	Globals::Game::spatialIndex.rebuild();
 	this->matchGameplayCamera();
 	this->fileMessage = "Loaded " + levelName_ + " (a failure is on stderr).";
 }
 
-bool Editor::levelPlace(const std::string& name_, MapLevel& rPlace_) const
+void Editor::loadHubWorld()
 {
-	const std::string& rName = name_.empty() ? Globals::Game::map.active : name_;
+	if(Globals::Game::hubWorld.levels.empty())
+	{
+		this->fileMessage = "Load HubWorld: HubWorld.json has no levels.";
+		return;
+	}
+	this->hubWorldSelected.clear();
+	this->hubWorldExtraSelected.clear();
+	this->loadLevel(Globals::Game::hubWorld.levels.front().name, "hub");
+	this->fileMessage = "Loaded the HubWorld, active level " + Globals::Game::hubWorld.levels.front().name + " (a failure is on stderr).";
+}
+
+bool Editor::levelPlace(const std::string& name_, HubWorldLevel& rPlace_) const
+{
+	const std::string& rName = name_.empty() ? Globals::Game::hubWorld.active : name_;
 	for(uint32_t i = 0; i < Globals::Game::levels.objects.size(); i++)
 	{
 		if(!Globals::Game::levels.alive[i] || Globals::Game::levels.objects[i].name != rName) continue;
 		rPlace_.name = rName;
-		rPlace_.position = Globals::Game::levels.objects[i].mapPosition;
-		rPlace_.rotation = Globals::Game::levels.objects[i].mapRotation;
+		rPlace_.position = Globals::Game::levels.objects[i].hubWorldPosition;
+		rPlace_.rotation = Globals::Game::levels.objects[i].hubWorldRotation;
 		return true;
 	}
 	return false;
 }
 
-std::vector<std::string> Editor::mapSelection() const
+std::vector<std::string> Editor::hubWorldSelection() const
 {
 	std::vector<std::string> names;
-	names.push_back(this->mapSelected.empty() ? Globals::Game::map.active : this->mapSelected);
-	for(const std::string& rName : this->mapExtraSelected)
+	names.push_back(this->hubWorldSelected.empty() ? Globals::Game::hubWorld.active : this->hubWorldSelected);
+	for(const std::string& rName : this->hubWorldExtraSelected)
 	{
 		if(std::find(names.begin(), names.end(), rName) == names.end()) names.push_back(rName);
 	}
 	std::erase_if(names, [this](const std::string& rName_) {
-		MapLevel place;
+		HubWorldLevel place;
 		return !this->levelPlace(rName_, place);
 	});
 	return names;
 }
 
-bool Editor::mapIsSelected(const std::string& name_) const
+bool Editor::hubWorldIsSelected(const std::string& name_) const
 {
-	std::vector<std::string> names = this->mapSelection();
+	std::vector<std::string> names = this->hubWorldSelection();
 	return std::find(names.begin(), names.end(), name_) != names.end();
 }
 
-void Editor::selectMapLevel(const std::string& name_, bool additive_)
+void Editor::selectHubWorldLevel(const std::string& name_, bool additive_)
 {
 	if(!additive_)
 	{
-		this->mapSelected = name_;
-		this->mapExtraSelected.clear();
+		this->hubWorldSelected = name_;
+		this->hubWorldExtraSelected.clear();
 		return;
 	}
-	std::vector<std::string> names = this->mapSelection();
+	std::vector<std::string> names = this->hubWorldSelection();
 	auto found = std::find(names.begin(), names.end(), name_);
 	if(found != names.end()) names.erase(found);
 	else names.insert(names.begin(), name_);
-	this->mapSelected = names.empty() ? std::string() : names.front();
-	this->mapExtraSelected.assign(names.empty() ? names.end() : names.begin() + 1, names.end());
+	this->hubWorldSelected = names.empty() ? std::string() : names.front();
+	this->hubWorldExtraSelected.assign(names.empty() ? names.end() : names.begin() + 1, names.end());
 }
 
-void Editor::setLevelPlace(const MapLevel& rPlace_)
+void Editor::setLevelPlace(const HubWorldLevel& rPlace_)
 {
 	for(uint32_t i = 0; i < Globals::Game::levels.objects.size(); i++)
 	{
 		if(!Globals::Game::levels.alive[i] || Globals::Game::levels.objects[i].name != rPlace_.name) continue;
-		Globals::Game::levels.objects[i].setMapTransform(rPlace_.position, rPlace_.rotation, false);
+		Globals::Game::levels.objects[i].setHubWorldTransform(rPlace_.position, rPlace_.rotation, false);
 		Globals::Game::spatialIndex.dirty = true;
-		Globals::Game::map.set(rPlace_);
-		this->mapDirty = true;
+		Globals::Game::hubWorld.set(rPlace_);
+		this->hubWorldDirty = true;
 		return;
 	}
 }
 
 void Editor::chooseActive(const std::string& name_)
 {
-	this->loadLevel(name_);
-	this->mapSelected = name_;
-	this->mapExtraSelected.clear();
-	this->mapView = false;
+	this->loadLevel(name_, "hub");
+	this->hubWorldSelected = name_;
+	this->hubWorldExtraSelected.clear();
+	this->hubWorldView = false;
 	this->entityList.focusLevelTab = true;
 }
 
-void Editor::addLevelToMap(const std::string& name_)
+void Editor::addLevelToHubWorld(const std::string& name_)
 {
-	MapLevel place;
+	HubWorldLevel place;
 	place.name = name_;
 	if(!this->levelPlace(name_, place))
 	{
-		Globals::Game::map.set(place);
+		Globals::Game::hubWorld.set(place);
+
+		/* Not in the HubWorld's load (Load level): the entry is written, the level is not loaded beside the active one, where it would overlap it at the origin. */
+		if(!Globals::Game::hubWorld.loadedAsHub)
+		{
+			this->hubWorldSelected = name_;
+			this->hubWorldExtraSelected.clear();
+			this->hubWorldDirty = true;
+			this->fileMessage = "Added " + name_ + " to the HubWorld (not loaded: the level was loaded alone).";
+			return;
+		}
 		try
 		{
 			PoolId id = Loading::loadLevel(name_);
-			Globals::Game::map.loaded.push_back(id);
+			Globals::Game::hubWorld.loaded.push_back(id);
 			Globals::Game::spatialIndex.rebuild();
+			this->clearUndo();
 		}
 		catch(const std::exception& rError)
 		{
-			this->fileMessage = "Add level to map: " + name_ + " not loaded: " + rError.what();
+			this->fileMessage = "Add level to HubWorld: " + name_ + " not loaded: " + rError.what();
 			return;
 		}
 	}
-	else Globals::Game::map.set(place);
-	this->mapSelected = name_;
-	this->mapExtraSelected.clear();
-	this->mapDirty = true;
-	this->fileMessage = "Added " + name_ + " to the map.";
+	else Globals::Game::hubWorld.set(place);
+	this->hubWorldSelected = name_;
+	this->hubWorldExtraSelected.clear();
+	this->hubWorldDirty = true;
+	this->fileMessage = "Added " + name_ + " to the HubWorld.";
 }
 
-void Editor::removeLevelFromMap(const std::string& name_)
+void Editor::removeLevelFromHubWorld(const std::string& name_)
 {
-	MapLevel place;
+	HubWorldLevel place;
 	if(this->levelPlace(name_, place))
 	{
-		if(name_ == Globals::Game::map.active)
+		if(name_ == Globals::Game::hubWorld.active)
 		{
 			place.position = glm::vec3(0.0f);
 			place.rotation = glm::vec3(0.0f);
@@ -759,26 +912,22 @@ void Editor::removeLevelFromMap(const std::string& name_)
 			{
 				if(!Globals::Game::levels.alive[i] || Globals::Game::levels.objects[i].name != name_) continue;
 				PoolId id(i, Globals::Game::levels.generation[i]);
-				std::erase(Globals::Game::map.loaded, id);
+				std::erase(Globals::Game::hubWorld.loaded, id);
 				Globals::Game::levels.remove(id);
 				break;
 			}
 			Globals::Game::spatialIndex.rebuild();
 		}
 	}
-	Globals::Game::map.remove(name_);
+	Globals::Game::hubWorld.remove(name_);
 	this->entityList.selectOnly(UninitializedPoolId);
-	this->mapSelected.clear();
-	this->mapExtraSelected.clear();
+	this->hubWorldSelected.clear();
+	this->hubWorldExtraSelected.clear();
 
-	/* A map step of Ctrl+Z would give the removed entry back (Map::set), so the map steps go. */
-	for(std::vector<UndoAction>* pStack : {&this->undoStack, &this->redoStack})
-	{
-		std::erase_if(*pStack, [](const UndoAction& rAction_) { return !rAction_.places.empty(); });
-	}
-	this->trackedPlaces.clear();
-	this->mapDirty = true;
-	this->fileMessage = "Removed " + name_ + " from the map.";
+	/* Steps that name the removed level's entities, or give its HubWorld entry back (HubWorld::set), would be wrong, so the undo history starts over. */
+	this->clearUndo();
+	this->hubWorldDirty = true;
+	this->fileMessage = "Removed " + name_ + " from the HubWorld.";
 }
 
 bool Editor::hasKeptLevel(const std::string& rName_) const
@@ -963,7 +1112,7 @@ void Editor::saveSourceLevel()
 		this->fileMessage = std::string("Save Source Game Level failed: ") + rError.what();
 		return;
 	}
-	this->loadLevel(levelName);
+	this->loadLevel(levelName, nullptr);
 	this->fileMessage = "Saved " + levelName + " as its Source Game Level and loaded it again (a load failure is on stderr).";
 }
 
@@ -1006,6 +1155,7 @@ void Editor::giveKeptLevel(PoolId levelId_, const KeptLevel& rKept_)
 		if(rPrefab.texture.kind != TextureChoiceKind::Default) setPrefabTexture(rPrefab.prefabId, rPrefab.texture, PrefabScope::Level, levelId_);
 	}
 
+	for(uint32_t index : rKept_.removed) rLevel.removeSourceEntity(index);
 	for(const KeptOwn& rOwn : rKept_.own)
 	{
 		if(rOwn.index >= rLevel.sourceEntityCount || !entityExists(rLevel.entityIds[rOwn.index])) continue;
@@ -1049,6 +1199,7 @@ void Editor::setPlaying(bool playing_)
 			const Level& rLevel = getLevel(levelId);
 			KeptLevel kept;
 			kept.name = Globals::Game::levels.names[levelSlot];
+			kept.removed = rLevel.removed;
 			for(uint32_t i = 0; i < Globals::Game::prefabs.objects.size(); i++)
 			{
 				if(!Globals::Game::prefabs.alive[i]) continue;
@@ -1060,10 +1211,11 @@ void Editor::setPlaying(bool playing_)
 			{
 				if(!entityExists(rLevel.entityIds[i])) continue;
 				const Entity& rEntity = getEntity(rLevel.entityIds[i]);
-				if(i < rLevel.sourceEntityCount) kept.own.push_back({i, keptEntityOf(rEntity, rLevel), rLevel.entityIds[i]});
-				else if(rEntity.prefabId != UninitializedPoolId) kept.added.push_back({rEntity.prefabId, keptEntityOf(rEntity, rLevel), rLevel.entityIds[i], i});
-				else if(rEntity.cameraId != UninitializedPoolId)
+				if(i < rLevel.sourceEntityCount) kept.own.push_back({i, keptEntityOf(rEntity, &rLevel), rLevel.entityIds[i]});
+				else if(rEntity.prefabId != UninitializedPoolId) kept.added.push_back({rEntity.prefabId, keptEntityOf(rEntity, &rLevel), rLevel.entityIds[i], i});
+				else
 				{
+					/* cameras holds the cameras and the plain entities (both are made again by spawnFrom). */
 					kept.cameras.push_back(this->snapshotOf(rLevel.entityIds[i]));
 					kept.cameraIndices.push_back(i);
 				}
@@ -1077,6 +1229,19 @@ void Editor::setPlaying(bool playing_)
 			}
 			this->keptLevels.push_back(std::move(kept));
 		}
+
+		/* The HubWorld's own entities (only while it is loaded), by the id they have now (undo steps and scripts that name them are moved to the new ones). */
+		if(Globals::Game::hubWorld.loadedAsHub)
+		{
+			for(PoolId id : Globals::Game::hubWorld.entityIds)
+			{
+				if(!entityExists(id)) continue;
+				Clipboard copy = this->snapshotOf(id);
+				if(!copy.valid) continue;
+				this->keptHubWorld.push_back(std::move(copy));
+				this->keptHubWorldIds.push_back(id);
+			}
+		}
 	}
 	this->tracked.clear();
 	this->trackedBusy = false;
@@ -1089,14 +1254,14 @@ void Editor::setPlaying(bool playing_)
 	if(this->active)
 	{
 		/*
-		The game goes back to its start: the scripts' level is made again from its data (the scripts' resetGame, which loads the map's levels beside it), and so is every other level that was alive at Play and is not one of those (loaded by name, whether play left it or not), so what the play moved, what the editor added or moved before it is put back (kept at Play).
+		The game goes back to its start: the scripts' level is made again from its data (the scripts' resetGame, which loads the HubWorld's levels beside it), and so is every other level that was alive at Play and is not one of those (loaded by name, whether play left it or not), so what the play moved, what the editor added or moved before it is put back (kept at Play).
 		Entities of the old levels are gone: nothing stays selected, and each level load makes its markers again.
 		*/
 		this->entityList.selectOnly(UninitializedPoolId);
 		Scripting::resetGame();
 		for(const KeptLevel& rKept : this->keptLevels)
 		{
-			/* The reset loaded the scripts' level and the map's others; a level of that name that is alive is used, one that is not (loaded by a script or the editor, outside the map) is made again and left to the map's next load to remove. */
+			/* The reset loaded the scripts' level and the HubWorld's others; a level of that name that is alive is used, one that is not (loaded by a script or the editor, outside the HubWorld) is made again and left to the HubWorld's next load to remove. */
 			PoolId levelId = UninitializedPoolId;
 			for(uint32_t i = 0; i < Globals::Game::levels.objects.size(); i++)
 			{
@@ -1107,7 +1272,7 @@ void Editor::setPlaying(bool playing_)
 				try
 				{
 					levelId = Loading::loadLevel(rKept.name);
-					Globals::Game::map.loaded.push_back(levelId);
+					Globals::Game::hubWorld.loaded.push_back(levelId);
 				}
 				catch(const std::exception& rError)
 				{
@@ -1119,6 +1284,22 @@ void Editor::setPlaying(bool playing_)
 			/* The reloaded level has the file's edits; the editor's own state replaces them. */
 			getLevel(levelId).restoreSource();
 			this->giveKeptLevel(levelId, rKept);
+		}
+
+		/* The reset made the HubWorld's entities again from HubWorld.json (as saved); the editor's state at Play replaces them. HubWorld.json is as unsaved as it was. */
+		if(!this->keptHubWorld.empty() && Globals::Game::hubWorld.loadedAsHub)
+		{
+			bool unsaved = this->hubWorldUnsaved;
+			std::vector<PoolId> fromFile = Globals::Game::hubWorld.entityIds;
+			for(PoolId id : fromFile) this->removeEntity(id);
+			for(size_t i = 0; i < this->keptHubWorld.size(); i++)
+			{
+				PoolId id = this->spawnFrom(this->keptHubWorld[i], this->keptHubWorld[i].entity.position);
+				if(id == UninitializedPoolId) continue;
+				this->renameUndoEntity(this->keptHubWorldIds[i], id);
+				if(Scripting::ready()) Scripting::entityRemade(this->keptHubWorldIds[i], id);
+			}
+			this->hubWorldUnsaved = unsaved;
 		}
 		Globals::Game::spatialIndex.rebuild();
 		this->matchGameplayCamera();
@@ -1187,21 +1368,26 @@ void Editor::processInputs()
 				this->saveAllLevels();
 			}
 		}
+		/* Delete removes the selected entities (deleteSelected), once per press, with the keyboard free. */
+		bool deleteDown = glfwGetKey(pWindow, GLFW_KEY_DELETE) == GLFW_PRESS;
+		if(keyboardFree && !rCamera.dragging && deleteDown && !this->deletePressed && !this->hubWorldView) this->deleteSelected();
+		this->deletePressed = deleteDown;
 		this->zPressed = zDown;
 		this->yPressed = yDown;
 		this->sPressed = sDown;
+		this->cPressed = cKey;
 
 		/*
 		The gizmo takes a left press on one of its handles and keeps the mouse until the handle is released. 1 / 2 / 3 pick Move / Rotate / Scale (W is a fly key, so W E R is not used); not during a drag or a camera hold, nor while a text field has the keyboard.
 		*/
-		if(this->mapView)
+		if(this->hubWorldView)
 		{
-			std::vector<MapLevel> places;
+			std::vector<HubWorldLevel> places;
 			std::vector<glm::vec3> positions;
 			std::vector<glm::vec3> rotations;
-			for(const std::string& rName : this->mapSelection())
+			for(const std::string& rName : this->hubWorldSelection())
 			{
-				MapLevel place;
+				HubWorldLevel place;
 				if(!this->levelPlace(rName, place)) continue;
 				places.push_back(place);
 				positions.push_back(place.position);
@@ -1227,7 +1413,7 @@ void Editor::processInputs()
 
 		/*
 		Click to select: a left press on the scene (not on the UI, a gizmo handle or during a camera hold) followed by a release selects the entity under the press (Graphics::pickEntity); a miss keeps the selection. The ray uses the press position.
-		With Shift held the entity (in the Map view, the level) is added to the selection or, if it is selected, removed from it. Shift is used, not Ctrl: Ctrl flies the camera down.
+		With Shift held the entity (in the HubWorld view, the level) is added to the selection or, if it is selected, removed from it. Shift is used, not Ctrl: Ctrl flies the camera down.
 		*/
 		bool clickDown = glfwGetMouseButton(pWindow, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 		if(clickDown && !this->clickLeftWas && !rCamera.dragging && !this->debugUI.wantsMouse() && !this->gizmo.wantsMouse())
@@ -1241,9 +1427,9 @@ void Editor::processInputs()
 			this->clickPending = false;
 			bool additive = glfwGetKey(pWindow, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(pWindow, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
 			PoolId picked = Graphics::pickEntity(pWindow, rCamera, this->clickX, this->clickY);
-			if(this->mapView)
+			if(this->hubWorldView)
 			{
-				/* In the Map view a click selects the level of the entity under it (an entity with no level counts as the active one's), else the level whose bounds the click enters (a level with no entities). */
+				/* In the HubWorld view a click selects the level of the entity under it (an entity with no level counts as the active one's), else the level whose bounds the click enters (a level with no entities). */
 				PoolId levelId = UninitializedPoolId;
 				if(picked != UninitializedPoolId)
 				{
@@ -1251,9 +1437,9 @@ void Editor::processInputs()
 					if(levelId == UninitializedPoolId || !Globals::Game::levels.alive[levelId.id]) levelId = activeLevelId();
 				}
 				else levelId = Graphics::pickLevel(pWindow, rCamera, this->clickX, this->clickY);
-				if(levelId != UninitializedPoolId) this->selectMapLevel(Globals::Game::levels.objects[levelId.id].name, additive);
+				if(levelId != UninitializedPoolId) this->selectHubWorldLevel(Globals::Game::levels.objects[levelId.id].name, additive);
 			}
-			else if(picked != UninitializedPoolId)
+			else if(picked != UninitializedPoolId && (!this->hubWorldEntities || this->inHubWorldList(getEntity(picked))))
 			{
 				if(additive) this->entityList.toggleSelected(picked);
 				else this->entityList.selectOnly(picked);
@@ -1263,14 +1449,14 @@ void Editor::processInputs()
 		this->clickLeftWas = clickDown;
 		this->trackTransform();
 
-		/* A map change is finished when the handle or the inspector widget is let go: the collision is put right then, but Map.json is only written by Save (saveAllLevels); mapUnsaved says it is behind. */
-		if(this->mapDirty && !this->gizmo.wantsMouse() && !ImGui::IsAnyItemActive())
+		/* A HubWorld change is finished when the handle or the inspector widget is let go: the collision is put right then, but HubWorld.json is only written by Save (saveAllLevels); hubWorldUnsaved says it is behind. */
+		if(this->hubWorldDirty && !this->gizmo.wantsMouse() && !ImGui::IsAnyItemActive())
 		{
-			this->mapDirty = false;
-			this->mapUnsaved = true;
+			this->hubWorldDirty = false;
+			this->hubWorldUnsaved = true;
 			for(uint32_t i = 0; i < Globals::Game::levels.objects.size(); i++)
 			{
-				if(Globals::Game::levels.alive[i]) Globals::Game::levels.objects[i].commitMapCollision();
+				if(Globals::Game::levels.alive[i]) Globals::Game::levels.objects[i].commitHubWorldCollision();
 			}
 		}
 		if(rCamera.updateDrag(pWindow, this->debugUI.wantsMouse() || this->gizmo.wantsMouse())) this->cursorFree = !rCamera.dragging;
@@ -1294,11 +1480,11 @@ void Editor::processInputs()
 	if(escapeDown && !this->escapePressed && !this->active) this->setPlaying(false);
 	this->escapePressed = escapeDown;
 
-	/* C toggles the collision lines view (Graphics::CollisionView); with Ctrl it is Ctrl+C (above), and so for V. */
+	/* Home toggles the collision lines view (Graphics::CollisionView). */
 	bool ctrlHeld = glfwGetKey(pWindow, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || glfwGetKey(pWindow, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
-	bool cDown = glfwGetKey(pWindow, GLFW_KEY_C) == GLFW_PRESS;
-	if(cDown && !this->cPressed && !ctrlHeld) this->collisionView.enabled = !this->collisionView.enabled;
-	this->cPressed = cDown;
+	bool homeDown = glfwGetKey(pWindow, GLFW_KEY_HOME) == GLFW_PRESS;
+	if(homeDown && !this->homePressed) this->collisionView.enabled = !this->collisionView.enabled;
+	this->homePressed = homeDown;
 
 	/* V switches the lines view between coloring by triangle attribute and by slope. */
 	bool vDown = glfwGetKey(pWindow, GLFW_KEY_V) == GLFW_PRESS;

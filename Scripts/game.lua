@@ -71,11 +71,18 @@ local function setLevelSnap(entity, levelGame)
 	end
 end
 
--- Loads the level and puts the camera and the players at its start.
-local function enter(name)
+-- Loads the level (alone, or with the whole HubWorld.json when hub is true) and puts the camera and the players at its start. A hub load with no name enters at the first level of HubWorld.json.
+local hubMode = false
+local function enter(name, hub)
+	hubMode = hub == true
+	if hub then
+		level = sf.loadHubWorld(name)
+		name = sf.levelName(level)
+	else
+		level = sf.loadLevel(name)
+	end
 	local data = LEVELS[name] or DEFAULT_START
 	current = name
-	level = sf.loadLevel(name)
 	sf.setCamera(table.unpack(data.camera))
 	for i, character in ipairs(CHARACTERS) do
 		local start = data.players[character]
@@ -92,17 +99,30 @@ local function enter(name)
 end
 
 -- L unloads the level and loads the next one of ORDER. The old level goes at the start of the next tick (sf.unloadLevel), so the new one is loaded on the tick after the key.
+-- A LoadLevel / LoadHubWorld trigger (main.lua) asks for the same thing through `pending` = {name, hub}: the level goes, then that one is loaded.
 local lHeld = false
 local unloading = false
+local pending = nil
 sf.behavior("LevelSwitch", function(entity)
 	if unloading then
 		if sf.levelExists(level) then return end
 		unloading = false
+		if pending ~= nil then
+			local request = pending
+			pending = nil
+			enter(request.name, request.hub)
+			return
+		end
 		local index = 1
 		for i, name in ipairs(ORDER) do
 			if name == current then index = i % #ORDER + 1 end
 		end
 		enter(ORDER[index])
+		return
+	end
+	if pending ~= nil then
+		sf.unloadLevel(level)
+		unloading = true
 		return
 	end
 	local lPressed = not sf.debugMode() and sf.key("L")
@@ -114,15 +134,28 @@ sf.behavior("LevelSwitch", function(entity)
 	end
 end)
 
--- The engine's reset (the editor's Stop and File > Load level, Scripting::resetGame): first call, the level is asked to go; second call, it is gone, so the same level (or the one named, a file of Levels/) is loaded with its objects and the players at its start.
-function resetGame(unloaded, name)
+-- What the LoadLevel / LoadHubWorld triggers of main.lua call: the level goes at the next tick, then that one is loaded (name nil: the first entry of HubWorld.json). Ignored while a change is under way.
+function requestLevelLoad(name, hub)
+	if pending ~= nil or unloading then return end
+	pending = {name = name, hub = hub}
+end
+
+-- The engine's reset (the editor's Stop and File > Load level / Load HubWorld, Scripting::resetGame): first call, the level is asked to go; second call, it is gone, so the same level (or the one named, a file of Levels/) is loaded with its objects and the players at its start. mode is "level" or "hub" (File > Load HubWorld); nil keeps the kind of the last load.
+function resetGame(unloaded, name, mode)
 	if not unloaded then
 		sf.unloadLevel(level)
 		return
 	end
 	unloading = false
+	pending = nil
 	lHeld = false
-	enter(name or current)
+	if mode == "hub" then
+		enter(name, true)
+	elseif mode == "level" then
+		enter(name or current, false)
+	else
+		enter(name or current, hubMode)
+	end
 	resetPlayers()
 end
 

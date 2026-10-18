@@ -2,8 +2,12 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <string>
 #include <glm/glm.hpp>
 #include "PoolId.h"
+#include "Constants.h"
+#include "ExternalField.h"
 
 namespace Physics
 {
@@ -16,6 +20,9 @@ Nothing is interpreted here beyond the layout; what the values mean is only what
 - kind, push, damage, attr: raw flags (what collides with what, push, damage, attributes); meanings unknown.
 - behavior: the shape's behaviour (Globals::Game::behaviors), from attr by the remap of its source (BABehaviors::resolve); UninitializedPoolId until a loader sets it (a moving entity's shape then counts as a Body).
 - center is relative to the object; angle is the shape's rotation in BAMS (65536 = a full turn), the order of the axes unknown.
+- values: the shape's own external values, by field name, for the fields its behaviour declares (BABehavior::fields, BABehaviors::fieldsOf): set in the BoundArea tab, handed to the behaviour's Lua functions as their third argument. Empty for every shape the
+  games' tables make. Only a value that was set is stored; the others read as the declared default. valuesKept holds, as JSON text, the values a level file had that no declared field took (the behaviour has no such field, or the value did not fit), so a save writes them back.
+  Shapes compare by value including both maps (prefab shape edits depend on it).
 */
 struct CollisionShape
 {
@@ -31,6 +38,8 @@ struct CollisionShape
 	float d;
 	glm::ivec3 angle;
 	PoolId behavior;
+	std::map<std::string, ExternalValue> values;
+	std::map<std::string, std::string> valuesKept;
 
 	bool operator==(const CollisionShape&) const = default;
 };

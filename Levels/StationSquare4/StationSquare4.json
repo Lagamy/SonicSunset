@@ -10,5 +10,43 @@
     "rel": "_Adv00.rel",
     "offset": "0x207E00"
   },
-  "textures": "advSS04.GVM"
+  "textures": "advSS04.GVM",
+  "entities": [
+    {
+      "name": "EmeraldCoastEntrance",
+      "position": [
+        -602.948486328125,
+        47.272216796875,
+        2129.51611328125
+      ],
+      "behaviors": [],
+      "shapes": [
+        {
+          "kind": 0,
+          "form": 3,
+          "push": 0,
+          "damage": 0,
+          "attr": 0,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "a": 10.300000190734863,
+          "b": 55.70000076293945,
+          "c": 61.79999923706055,
+          "d": 0.0,
+          "angle": [
+            0,
+            0,
+            0
+          ],
+          "behavior": "LoadLevel",
+          "values": {
+            "level": "EmeraldCoast"
+          }
+        }
+      ]
+    }
+  ]
 }

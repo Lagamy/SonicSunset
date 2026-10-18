@@ -9,9 +9,9 @@
 namespace Graphics
 {
 /*
-The inspector of the editor: a panel along the right edge of the window for the entity selected in the EntityListPanel. Its name, then a tab bar with the Transform and one tab per module the entity has (the
+The inspector of the editor: a panel along the right edge of the window for the entity selected in the EntityListPanel. Its name with a "Make prefab" button (saves the entity as a Global External prefab with its external model and texture), then a tab bar with the Transform and one tab per module the entity has (the
 handles of Entity that are not UninitializedPoolId): BoundArea (always shown: collisionId's shapes, which the engine tests for intersections and whose tags and interactions decide what an overlap does, so collisions, triggers
-and death planes; they can be edited, added and removed, for one entity or its whole prefab), Physics (physicsId), Behaviour (always shown: behaviours can be added to any entity, one entity or all of its prefab, by combo or by dropping a script from the Assets tab), Texture (shown for an entity with a model: the texture it is drawn with, one entity or all of its prefab, from a disc texture dropped from the Assets tab or an external png/jpeg picked from a combo) Mesh (shown for an entity with a model: the model it is drawn with, one entity or all of its prefab, from a disc model dropped from the Assets tab, a .DFF of a Shadow entity's archive or an external model picked from a combo), and Camera (cameraId). Drawn by DebugUI::draw, inside its ImGui frame; Editor::inspector.
+and death planes, and under a shape's behaviour the values of the fields that behaviour declares (BABehavior::fields, stored in CollisionShape::values, drawn by the same code as the Behaviour tab's fields); they can be edited, added and removed, for one entity or its whole prefab), Physics (physicsId), Behaviour (always shown: behaviours can be added to any entity, one entity or all of its prefab, by combo or by dropping a script from the Assets tab), Texture (shown for an entity with a model: the texture it is drawn with, one entity or all of its prefab, from a disc texture dropped from the Assets tab or an external png/jpeg picked from a combo) Mesh (shown for an entity with a model: the model it is drawn with, one entity or all of its prefab, from a disc model dropped from the Assets tab, a .DFF of a Shadow entity's archive or an external model picked from a combo), and Camera (cameraId). Drawn by DebugUI::draw, inside its ImGui frame; Editor::inspector.
 */
 struct InspectorPanel
 {
@@ -43,6 +43,9 @@ private:
 
 	/* The switch of the "Every entity of <prefab>" boxes (all four tabs): false = the open level's edits (the level's set in Prefab::inLevels, saved with the level), true = every level's (Prefab::changed, the prefab's Changed file, saved at once). Not for an External prefab. */
 	bool allLevels = false;
+
+	/* The "Make prefab" popup next to the entity's name: the name being typed. */
+	char prefabName[64] = "";
 
 	void drawScopeSwitch(PoolId prefabId_);
 	void tryEdit(const std::function<void()>& rEdit_);

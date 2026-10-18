@@ -175,50 +175,58 @@ struct Capsule
 	float halfLength;
 	float radius;
 	PoolId behavior;
+	/* The shape's index in Collision::shapes (what an interaction tells the script, see Interaction). */
+	int shapeIndex;
 };
 
 static std::vector<Capsule> capsulesOf(const Collision& rCollision_)
 {
 	std::vector<Capsule> capsules;
-	for(const CollisionShape& rShape : rCollision_.shapes)
+	for(size_t s = 0; s < rCollision_.shapes.size(); s++)
 	{
+		const CollisionShape& rShape = rCollision_.shapes[s];
 		PoolId behavior = rShape.behavior != UninitializedPoolId ? rShape.behavior : Globals::Game::baBehaviors.body;
 		if(rShape.form == 0)
 		{
-			capsules.push_back(Capsule{rShape.center, glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, rShape.a, behavior});
+			capsules.push_back(Capsule{rShape.center, glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, rShape.a, behavior, static_cast<int>(s)});
 		}
 		else if(rShape.form == 6)
 		{
 			glm::mat4 rotation = Graphics::composeNinjaTransform(glm::vec3(0.0f), glm::vec3(rShape.angle), glm::vec3(1.0f), Graphics::NinjaNoPosition | Graphics::NinjaNoScale);
-			capsules.push_back(Capsule{rShape.center, glm::vec3(rotation * glm::vec4(0.0f, 0.0f, 1.0f, 0.0f)), rShape.b, rShape.a, behavior});
+			capsules.push_back(Capsule{rShape.center, glm::vec3(rotation * glm::vec4(0.0f, 0.0f, 1.0f, 0.0f)), rShape.b, rShape.a, behavior, static_cast<int>(s)});
 		}
 	}
 	return capsules;
 }
 
 /*
-One interaction to call: the function of a behaviour's availableInteractions with the entity that owns the behaviour's collision (parent) and the other one (contact), see BABehavior.h.
+One interaction to call: the function of a behaviour's availableInteractions with the entity that owns the behaviour's collision (parent) and the other one (contact), see BABehavior.h. parentShape is the index of the parent's
+shape (in its Collision::shapes) that touched, -1 when the parent's side is a level's triangle or the entity's segment probe, which have no shape; a script gets that shape's values.
 */
 struct Interaction
 {
 	BAInteraction function;
 	PoolId parent;
 	PoolId contact;
+	int parentShape;
 };
 
-/* The interactions of an overlap of a collision of rA_ owned by aEntity_ and one of rB_ owned by bEntity_: each side's functions for the other's tags, each once. */
-static void collectInteractions(const BABehavior& rA_, PoolId aEntity_, const BABehavior& rB_, PoolId bEntity_, std::vector<Interaction>& rOut_)
+/*
+The interactions of an overlap of a collision of rA_ owned by aEntity_ (its shape aShape_, -1 for none) and one of rB_ owned by bEntity_ (bShape_): each side's functions for the other's tags, each once, each with its own side's shape. A function already
+collected for the same parent and contact keeps the shape of the first overlap.
+*/
+static void collectInteractions(const BABehavior& rA_, PoolId aEntity_, int aShape_, const BABehavior& rB_, PoolId bEntity_, int bShape_, std::vector<Interaction>& rOut_)
 {
-	auto add = [&](const BAInteraction& rFunction_, PoolId parent_, PoolId contact_)
+	auto add = [&](const BAInteraction& rFunction_, PoolId parent_, PoolId contact_, int parentShape_)
 	{
 		for(const Interaction& rInteraction : rOut_)
 		{
 			if(rInteraction.function == rFunction_ && rInteraction.parent == parent_ && rInteraction.contact == contact_) return;
 		}
-		rOut_.push_back(Interaction{rFunction_, parent_, contact_});
+		rOut_.push_back(Interaction{rFunction_, parent_, contact_, parentShape_});
 	};
-	rA_.forEachInteraction(rB_, [&](const BAInteraction& rFunction_) { add(rFunction_, aEntity_, bEntity_); });
-	rB_.forEachInteraction(rA_, [&](const BAInteraction& rFunction_) { add(rFunction_, bEntity_, aEntity_); });
+	rA_.forEachInteraction(rB_, [&](const BAInteraction& rFunction_) { add(rFunction_, aEntity_, bEntity_, aShape_); });
+	rB_.forEachInteraction(rA_, [&](const BAInteraction& rFunction_) { add(rFunction_, bEntity_, aEntity_, bShape_); });
 }
 
 /*
@@ -410,7 +418,7 @@ static void moveCapsules(uint32_t entityIndex_, const std::vector<Capsule>& rCap
 					float distance = glm::length(away);
 					if(distance >= rCapsule.radius) continue;
 
-					if(touchable) collectInteractions(rMoverBehavior, entityId, rArea, rCollision.entityId, interactions);
+					if(touchable) collectInteractions(rMoverBehavior, entityId, rCapsule.shapeIndex, rArea, rCollision.entityId, -1, interactions);
 					if(!solid) continue;
 
 					float depth = rCapsule.radius - distance;
@@ -581,7 +589,7 @@ static void moveCapsules(uint32_t entityIndex_, const std::vector<Capsule>& rCap
 	for(const Interaction& rInteraction : interactions)
 	{
 		if(editorActive()) break;
-		if(shouldCall(rInteraction)) rInteraction.function.call(rInteraction.parent, rInteraction.contact);
+		if(shouldCall(rInteraction)) rInteraction.function.call(rInteraction.parent, rInteraction.contact, rInteraction.parentShape);
 	}
 }
 
@@ -776,7 +784,7 @@ active shape), and a pair is overlap-tested only if one side has an interaction 
 - A capsule or sphere shape of an entity with a physics is pushed out of every shape of another entity that its behaviour collides with (BABehavior::collidesWith: the deepest first, up to MaxPushIterations times), the entity
   (all its shapes) moves by the sum and its velocity loses the part going into the shapes. The other entity is not moved (a physics entity is pushed by what it collides with, not by what collides with it).
 - Every overlap of two shapes calls the interactions each side has for the other's tags (BABehavior::availableInteractions) with the shape's own entity as the parent and the other shape's entity as the contact
-  (Collision::entityId), each once, last (the callbacks may change the pools). A pair with a collision rule but no interaction is not tested (the push-out above has done what it does).
+  (Collision::entityId) and, for a script, the values of each side's own shape (Interaction::parentShape), each once, last (the callbacks may change the pools). A pair with a collision rule but no interaction is not tested (the push-out above has done what it does).
 */
 /* True if two bounding spheres do not touch (squared distances, no square root: this runs for every pair). */
 static bool spheresApart(const glm::vec3& rCenterA_, float radiusA_, const glm::vec3& rCenterB_, float radiusB_)
@@ -814,6 +822,7 @@ static void updateEntityContacts()
 		PoolId behaviorId;
 		const BABehavior* pBehavior;
 		const CollisionShape* pShape;
+		int shapeIndex;
 		glm::vec3 center;
 		float radius;
 		bool active;
@@ -829,8 +838,9 @@ static void updateEntityContacts()
 		const Entity& rEntity = Globals::Game::entities.objects[i];
 		if(rEntity.collisionId == UninitializedPoolId) continue;
 		const Collision& rCollision = Globals::Physics::collisions[rEntity.collisionId];
-		for(const CollisionShape& rShape : rCollision.shapes)
+		for(size_t shapeIndex = 0; shapeIndex < rCollision.shapes.size(); shapeIndex++)
 		{
+			const CollisionShape& rShape = rCollision.shapes[shapeIndex];
 			if(rShape.behavior == UninitializedPoolId) continue;
 			ShapeRef ref;
 			ref.entity = i;
@@ -838,6 +848,7 @@ static void updateEntityContacts()
 			ref.behaviorId = rShape.behavior;
 			ref.pBehavior = &Globals::Game::behaviors[rShape.behavior];
 			ref.pShape = &rShape;
+			ref.shapeIndex = static_cast<int>(shapeIndex);
 			ref.active = ref.pBehavior->hasRules();
 			ref.built = false;
 			if(!boundsOf(rEntity, rShape, ref.center, ref.radius)) continue;
@@ -961,13 +972,13 @@ static void updateEntityContacts()
 			const BABehavior& rB = *shapes[j].pBehavior;
 			if(!rA.interactsWith(rB) && !rB.interactsWith(rA)) continue;
 			if(!shapesOverlap(shapeOf(shapes[i]), shapeOf(shapes[j]))) continue;
-			collectInteractions(rA, shapes[i].parent, rB, shapes[j].parent, interactions);
+			collectInteractions(rA, shapes[i].parent, shapes[i].shapeIndex, rB, shapes[j].parent, shapes[j].shapeIndex, interactions);
 		}
 	}
 	for(const Interaction& rInteraction : interactions)
 	{
 		if(editorActive()) break;
-		if(shouldCall(rInteraction)) rInteraction.function.call(rInteraction.parent, rInteraction.contact);
+		if(shouldCall(rInteraction)) rInteraction.function.call(rInteraction.parent, rInteraction.contact, rInteraction.parentShape);
 	}
 }
 
@@ -1063,12 +1074,12 @@ void CollisionSystem::update()
 		for(const Touch& rTouch : touches)
 		{
 			if(rTouch.t > nearest) continue;
-			collectInteractions(rBody, entityId, Globals::Game::behaviors[rTouch.area], rTouch.parent, interactions);
+			collectInteractions(rBody, entityId, -1, Globals::Game::behaviors[rTouch.area], rTouch.parent, -1, interactions);
 		}
 		for(const Interaction& rInteraction : interactions)
 		{
 			if(editorActive()) break;
-			if(shouldCall(rInteraction)) rInteraction.function.call(rInteraction.parent, rInteraction.contact);
+			if(shouldCall(rInteraction)) rInteraction.function.call(rInteraction.parent, rInteraction.contact, rInteraction.parentShape);
 		}
 	}
 

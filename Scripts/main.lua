@@ -81,3 +81,23 @@ end
 function recordPlayerStarts()
 	for i, player in ipairs(players) do starts[i] = {sf.position(player)} end
 end
+
+-- Triggers that change the level. The collision behaviours LoadLevel and LoadHubWorld (tags of the same names) act on a Body that touches them; the level to load is the string `level` of the touching shape's own values
+-- (the third argument of the interaction function), set per shape in the BoundArea tab of the editor's Inspector (a file of Levels/; for LoadHubWorld the level that is active, empty = the first entry of HubWorld.json).
+-- LoadLevelFields only declares that field: the collision behaviours name it with fields = "LoadLevelFields". game.lua does the change (requestLevelLoad).
+sf.behavior("LoadLevelFields", function(entity) end, {level = {type = "level", default = "", external = true}})
+
+local tagBody = sf.tag("Body")
+local tagLoadLevel = sf.tag("LoadLevel")
+local tagLoadHubWorld = sf.tag("LoadHubWorld")
+
+local function triggerTouched(trigger, player, shape, hub)
+	if not sf.exists(trigger) or not sf.hasBody(player) then return end
+	local name = shape and shape.level
+	if name == nil or name == "" then name = nil end
+	if not hub and name == nil then return end
+	requestLevelLoad(name, hub)
+end
+
+sf.collisionBehavior("LoadLevel", {tags = {tagLoadLevel}, fields = "LoadLevelFields", interactions = {[tagBody] = function(trigger, player, shape) triggerTouched(trigger, player, shape, false) end}})
+sf.collisionBehavior("LoadHubWorld", {tags = {tagLoadHubWorld}, fields = "LoadLevelFields", interactions = {[tagBody] = function(trigger, player, shape) triggerTouched(trigger, player, shape, true) end}})

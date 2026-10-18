@@ -4,6 +4,7 @@
 #include "Editor.h"
 #include "Level.h"
 #include "Prefab.h"
+#include "ExternalPrefabs.h"
 #include "EntityBehavior.h"
 #include "GPU_Globals.h"
 #include "imgui.h"
@@ -28,8 +29,8 @@ void InspectorPanel::draw(PoolId selected_)
 	ImGui::Begin("Inspector", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
 	this->width = ImGui::GetWindowSize().x;
 
-	/* The Map view edits the selected level's place, not an entity. */
-	if(editor.mapView)
+	/* The HubWorld view edits the selected level's place, not an entity. */
+	if(editor.hubWorldView)
 	{
 		this->drawLevelPlace();
 		ImGui::End();
@@ -45,6 +46,38 @@ void InspectorPanel::draw(PoolId selected_)
 
 	Entity& rEntity = getEntity(selected_);
 	ImGui::Text("%s", Globals::Game::entities.names[selected_.id].c_str());
+	ImGui::SameLine();
+	if(ImGui::Button("Make prefab"))
+	{
+		std::snprintf(this->prefabName, sizeof(this->prefabName), "%s", Globals::Game::entities.names[selected_.id].c_str());
+		ImGui::OpenPopup("MakePrefab");
+	}
+
+	/*
+	Saves the entity as an External prefab of the Global folder (every level; Loading::createExternalPrefab, written at once). Only what an External prefab file holds is kept: the entity's external model and texture. Behaviours, shapes and the transform are not part of it. The result is in fileMessage.
+	*/
+	if(ImGui::BeginPopup("MakePrefab"))
+	{
+		ImGui::TextUnformatted("Prefab name");
+		if(ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+		bool enter = ImGui::InputText("##prefabName", this->prefabName, sizeof(this->prefabName), ImGuiInputTextFlags_EnterReturnsTrue);
+		if(ImGui::Button("Create") || enter)
+		{
+			try
+			{
+				PoolId prefabId = Loading::createExternalPrefab(Loading::ExternalScope::Project, "", this->prefabName);
+				if(rEntity.meshChoice.kind == MeshChoiceKind::External) setPrefabMesh(prefabId, rEntity.meshChoice);
+				if(rEntity.textureChoice.kind == TextureChoiceKind::External) setPrefabTexture(prefabId, rEntity.textureChoice);
+				editor.fileMessage = std::format("Made prefab Global/{}.", this->prefabName);
+			}
+			catch(const std::exception& rError)
+			{
+				editor.fileMessage = std::string("Prefab not made: ") + rError.what();
+			}
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndPopup();
+	}
 	ImGui::Separator();
 	if(ImGui::BeginTabBar("InspectorTabs"))
 	{
@@ -140,15 +173,15 @@ void InspectorPanel::drawTransform(PoolId entityId_)
 }
 
 /*
-The Map view's inspector: the selected level's place in the map (MapLevel: position and rotation in degrees, Level::mapMatrix), set with Editor::setLevelPlace; the gizmo's Move and Rotate buttons as in the Transform tab. "Choose as active" is Load level for this level
+The HubWorld view's inspector: the selected level's place in the HubWorld (HubWorldLevel: position and rotation in degrees, Level::hubWorldMatrix), set with Editor::setLevelPlace; the gizmo's Move and Rotate buttons as in the Transform tab. "Choose as active" is Load HubWorld with this level active
 (Editor::chooseActive), and goes to the Level tab.
 */
 void InspectorPanel::drawLevelPlace()
 {
-	MapLevel place;
-	if(!editor.levelPlace(editor.mapSelected, place))
+	HubWorldLevel place;
+	if(!editor.levelPlace(editor.hubWorldSelected, place))
 	{
-		ImGui::TextDisabled("Select a level in the Map tab.");
+		ImGui::TextDisabled("Select a level in the HubWorld tab.");
 		return;
 	}
 	ImGui::Text("%s", place.name.c_str());
@@ -158,14 +191,14 @@ void InspectorPanel::drawLevelPlace()
 	changed = ImGui::DragFloat3("Rotation", &place.rotation.x, 0.5f) || changed;
 	gizmoButton("Rotate##levelRotation", Gizmo::Rotate);
 	if(changed) editor.setLevelPlace(place);
-	ImGui::Text("In Map.json: %s", Globals::Game::map.find(place.name) ? "yes" : "no (set a place to add it)");
+	ImGui::Text("In HubWorld.json: %s", Globals::Game::hubWorld.find(place.name) ? "yes" : "no (set a place to add it)");
 	ImGui::Separator();
-	ImGui::BeginDisabled(place.name == Globals::Game::map.active);
+	ImGui::BeginDisabled(place.name == Globals::Game::hubWorld.active);
 	if(ImGui::Button("Choose as active")) editor.chooseActive(place.name);
 	ImGui::EndDisabled();
-	ImGui::TextWrapped("Loads the level as File > Load level does: unsaved edits are gone.");
-	ImGui::BeginDisabled(!Globals::Game::map.find(place.name));
-	if(ImGui::Button("Remove from map")) editor.removeLevelFromMap(place.name);
+	ImGui::TextWrapped("Loads the HubWorld with this level active, as File > Load HubWorld does: unsaved edits are gone.");
+	ImGui::BeginDisabled(!Globals::Game::hubWorld.find(place.name));
+	if(ImGui::Button("Remove from HubWorld")) editor.removeLevelFromHubWorld(place.name);
 	ImGui::EndDisabled();
 }
 
@@ -387,8 +420,151 @@ static int shapeIconRow(int selectedKind_)
 	return clicked;
 }
 
+/* After a shape's behaviour changed: its values keep the ones the new behaviour declares a field of (by name) and drop the rest, and what a level file had that no field took (valuesKept) is dropped with them. */
+static void keepFieldsOfBehavior(Physics::CollisionShape& rShape_)
+{
+	const std::vector<ExternalField>& rFields = Globals::Game::baBehaviors.fieldsOf(rShape_.behavior);
+	std::erase_if(rShape_.values, [&](const auto& rEntry_) { return std::none_of(rFields.begin(), rFields.end(), [&](const ExternalField& rField_) { return rField_.name == rEntry_.first; }); });
+	rShape_.valuesKept.clear();
+}
+
 /*
-The fields of one shape, for a shape of "This entity" and for a prefab-wide one: the kind icons (changing the kind keeps the sizes that are set), the size fields of the kind, center, angle, the raw fields, and the collision behaviour with its tags.
+The external fields of one declared list (EntityBehavior::fields, or the fields of a collision behaviour: BABehaviors::fieldsOf), the ones declared external = true, drawn over a map of values by field name (Entity::externals of one behaviour, or CollisionShape::values): a number,
+bool, string or vec3 is a plain widget; an entity field takes an entity dragged from the list ("ENTITY" payload: the packed PoolId, as EntityListPanel makes it), a prefab field a prefab dragged from the Prefabs tab ("PREFAB" payload: its PoolId), a level field a level dragged from the Levels tab ("LEVEL" payload: its name, null terminated). A value is stored only once its
+widget was touched; Reset forgets it, back to the declared default. True when a value was set or reset.
+*/
+static bool drawFieldValues(const std::vector<ExternalField>& rFields_, std::map<std::string, ExternalValue>& rValues_)
+{
+	bool anyChanged = false;
+	for(const ExternalField& rField : rFields_)
+	{
+		if(!rField.external) continue;
+		ExternalValue value = rField.defaultValue;
+		bool isSet = false;
+		auto found = rValues_.find(rField.name);
+		if(found != rValues_.end())
+		{
+			value = found->second;
+			isSet = true;
+		}
+
+		ImGui::PushID(rField.name.c_str());
+		bool touched = false;
+		switch(rField.type)
+		{
+		case ExternalType::Number:
+			touched = ImGui::DragScalar(rField.name.c_str(), ImGuiDataType_Double, &value.number, 0.05f);
+			break;
+		case ExternalType::Bool:
+			touched = ImGui::Checkbox(rField.name.c_str(), &value.flag);
+			break;
+		case ExternalType::String:
+		{
+			char buffer[256];
+			std::snprintf(buffer, sizeof(buffer), "%s", value.text.c_str());
+			if(ImGui::InputText(rField.name.c_str(), buffer, sizeof(buffer)))
+			{
+				value.text = buffer;
+				touched = true;
+			}
+			break;
+		}
+		case ExternalType::Vec3:
+			touched = ImGui::DragFloat3(rField.name.c_str(), &value.vector.x, 0.05f);
+			break;
+		case ExternalType::Entity:
+		{
+			bool exists = entityExists(value.entity);
+			ImGui::Button(exists ? Globals::Game::entities.names[value.entity.id].c_str() : "(drop an entity)", ImVec2(ImGui::GetContentRegionAvail().x * 0.6f, 0.0f));
+			if(ImGui::BeginDragDropTarget())
+			{
+				if(const ImGuiPayload* pPayload = ImGui::AcceptDragDropPayload("ENTITY"))
+				{
+					uint64_t packed = *static_cast<const uint64_t*>(pPayload->Data);
+					value.entity = PoolId(static_cast<uint32_t>(packed & 0xFFFFFFFFu), static_cast<uint32_t>(packed >> 32));
+					touched = true;
+				}
+				ImGui::EndDragDropTarget();
+			}
+			ImGui::SameLine();
+			if(exists && ImGui::SmallButton("Clear"))
+			{
+				value.entity = UninitializedPoolId;
+				touched = true;
+			}
+			ImGui::SameLine();
+			ImGui::TextUnformatted(rField.name.c_str());
+			break;
+		}
+		case ExternalType::Prefab:
+		{
+			auto& rPrefabs = Globals::Game::prefabs;
+			bool exists = value.prefab.id < rPrefabs.objects.size() && rPrefabs.alive[value.prefab.id] && rPrefabs.generation[value.prefab.id] == value.prefab.generation;
+			ImGui::Button(exists ? rPrefabs.names[value.prefab.id].c_str() : "(drop a prefab)", ImVec2(ImGui::GetContentRegionAvail().x * 0.6f, 0.0f));
+			if(ImGui::BeginDragDropTarget())
+			{
+				if(const ImGuiPayload* pPayload = ImGui::AcceptDragDropPayload("PREFAB"))
+				{
+					value.prefab = *static_cast<const PoolId*>(pPayload->Data);
+					touched = true;
+				}
+				ImGui::EndDragDropTarget();
+			}
+			ImGui::SameLine();
+			if(exists && ImGui::SmallButton("Clear"))
+			{
+				value.prefab = UninitializedPoolId;
+				touched = true;
+			}
+			ImGui::SameLine();
+			ImGui::TextUnformatted(rField.name.c_str());
+			break;
+		}
+		case ExternalType::Level:
+		{
+			bool exists = !value.text.empty();
+			ImGui::Button(exists ? value.text.c_str() : "(drop a level)", ImVec2(ImGui::GetContentRegionAvail().x * 0.6f, 0.0f));
+			if(ImGui::BeginDragDropTarget())
+			{
+				if(const ImGuiPayload* pPayload = ImGui::AcceptDragDropPayload("LEVEL"))
+				{
+					value.text = static_cast<const char*>(pPayload->Data);
+					touched = true;
+				}
+				ImGui::EndDragDropTarget();
+			}
+			ImGui::SameLine();
+			if(exists && ImGui::SmallButton("Clear"))
+			{
+				value.text.clear();
+				touched = true;
+			}
+			ImGui::SameLine();
+			ImGui::TextUnformatted(rField.name.c_str());
+			break;
+		}
+		}
+		if(touched)
+		{
+			rValues_[rField.name] = value;
+			anyChanged = true;
+		}
+		if(isSet)
+		{
+			ImGui::SameLine();
+			if(ImGui::SmallButton("Reset"))
+			{
+				rValues_.erase(rField.name);
+				anyChanged = true;
+			}
+		}
+		ImGui::PopID();
+	}
+	return anyChanged;
+}
+
+/*
+The fields of one shape, for a shape of "This entity" and for a prefab-wide one: the kind icons (changing the kind keeps the sizes that are set), the size fields of the kind, center, angle, the raw fields, and the collision behaviour with its tags and, under it, the values of the fields the behaviour declares (BABehavior::fields; CollisionShape::values).
 sadx_ (the entity's game) decides the form a cylinder is given. True when anything was edited.
 */
 static bool drawShapeFields(Physics::CollisionShape& rShape_, bool sadx_)
@@ -476,6 +652,7 @@ static bool drawShapeFields(Physics::CollisionShape& rShape_, bool sadx_)
 		for(PoolId tag : rBehavior.tags) ImGui::BulletText("tag %s", Globals::Game::baTags.names[tag.id].c_str());
 		ImGui::Text("Collides with %u tags, interacts with %u", static_cast<uint32_t>(rBehavior.availableCollisions.size()), static_cast<uint32_t>(rBehavior.availableInteractions.size()));
 	}
+	changed |= drawFieldValues(Globals::Game::baBehaviors.fieldsOf(rShape_.behavior), rShape_.values);
 	return changed;
 }
 
@@ -1004,116 +1181,17 @@ void InspectorPanel::acceptScript(PoolId entityId_, bool forPrefab_)
 	ImGui::EndDragDropTarget();
 }
 
-/*
-The external fields (EntityBehavior::fields, the ones declared external = true) of one behaviour of the entity, under its row: a number, bool, string or vec3 is a plain widget; an entity field takes an entity dragged from the list ("ENTITY" payload: the packed PoolId, as EntityListPanel
-makes it), a prefab field a prefab dragged from the Prefabs tab ("PREFAB" payload: its PoolId). A value is stored on the entity (Entity::externals) only once its widget was touched; Reset forgets it, back to the declared default.
-*/
+/* The external fields of one behaviour of the entity, under its row (drawFieldValues over Entity::externals of that behaviour; an emptied entry is erased). */
 void InspectorPanel::drawFields(PoolId entityId_, PoolId behaviorId_)
 {
 	Entity& rEntity = getEntity(entityId_);
-	const EntityBehavior& rBehavior = Globals::Game::entityBehaviorTypes[behaviorId_];
 	const std::string& rBehaviorName = Globals::Game::entityBehaviorTypes.names[behaviorId_.id];
-	for(const ExternalField& rField : rBehavior.fields)
-	{
-		if(!rField.external) continue;
-		ExternalValue value = rField.defaultValue;
-		bool isSet = false;
-		auto set = rEntity.externals.find(rBehaviorName);
-		if(set != rEntity.externals.end())
-		{
-			auto found = set->second.find(rField.name);
-			if(found != set->second.end())
-			{
-				value = found->second;
-				isSet = true;
-			}
-		}
-
-		ImGui::PushID(rField.name.c_str());
-		bool changed = false;
-		switch(rField.type)
-		{
-		case ExternalType::Number:
-			changed = ImGui::DragScalar(rField.name.c_str(), ImGuiDataType_Double, &value.number, 0.05f);
-			break;
-		case ExternalType::Bool:
-			changed = ImGui::Checkbox(rField.name.c_str(), &value.flag);
-			break;
-		case ExternalType::String:
-		{
-			char buffer[256];
-			std::snprintf(buffer, sizeof(buffer), "%s", value.text.c_str());
-			if(ImGui::InputText(rField.name.c_str(), buffer, sizeof(buffer)))
-			{
-				value.text = buffer;
-				changed = true;
-			}
-			break;
-		}
-		case ExternalType::Vec3:
-			changed = ImGui::DragFloat3(rField.name.c_str(), &value.vector.x, 0.05f);
-			break;
-		case ExternalType::Entity:
-		{
-			bool exists = entityExists(value.entity);
-			ImGui::Button(exists ? Globals::Game::entities.names[value.entity.id].c_str() : "(drop an entity)", ImVec2(ImGui::GetContentRegionAvail().x * 0.6f, 0.0f));
-			if(ImGui::BeginDragDropTarget())
-			{
-				if(const ImGuiPayload* pPayload = ImGui::AcceptDragDropPayload("ENTITY"))
-				{
-					uint64_t packed = *static_cast<const uint64_t*>(pPayload->Data);
-					value.entity = PoolId(static_cast<uint32_t>(packed & 0xFFFFFFFFu), static_cast<uint32_t>(packed >> 32));
-					changed = true;
-				}
-				ImGui::EndDragDropTarget();
-			}
-			ImGui::SameLine();
-			if(exists && ImGui::SmallButton("Clear"))
-			{
-				value.entity = UninitializedPoolId;
-				changed = true;
-			}
-			ImGui::SameLine();
-			ImGui::TextUnformatted(rField.name.c_str());
-			break;
-		}
-		case ExternalType::Prefab:
-		{
-			auto& rPrefabs = Globals::Game::prefabs;
-			bool exists = value.prefab.id < rPrefabs.objects.size() && rPrefabs.alive[value.prefab.id] && rPrefabs.generation[value.prefab.id] == value.prefab.generation;
-			ImGui::Button(exists ? rPrefabs.names[value.prefab.id].c_str() : "(drop a prefab)", ImVec2(ImGui::GetContentRegionAvail().x * 0.6f, 0.0f));
-			if(ImGui::BeginDragDropTarget())
-			{
-				if(const ImGuiPayload* pPayload = ImGui::AcceptDragDropPayload("PREFAB"))
-				{
-					value.prefab = *static_cast<const PoolId*>(pPayload->Data);
-					changed = true;
-				}
-				ImGui::EndDragDropTarget();
-			}
-			ImGui::SameLine();
-			if(exists && ImGui::SmallButton("Clear"))
-			{
-				value.prefab = UninitializedPoolId;
-				changed = true;
-			}
-			ImGui::SameLine();
-			ImGui::TextUnformatted(rField.name.c_str());
-			break;
-		}
-		}
-		if(changed) rEntity.externals[rBehaviorName][rField.name] = value;
-		if(isSet)
-		{
-			ImGui::SameLine();
-			if(ImGui::SmallButton("Reset"))
-			{
-				rEntity.externals[rBehaviorName].erase(rField.name);
-				if(rEntity.externals[rBehaviorName].empty()) rEntity.externals.erase(rBehaviorName);
-			}
-		}
-		ImGui::PopID();
-	}
+	std::map<std::string, ExternalValue> values;
+	auto set = rEntity.externals.find(rBehaviorName);
+	if(set != rEntity.externals.end()) values = set->second;
+	if(!drawFieldValues(Globals::Game::entityBehaviorTypes[behaviorId_].fields, values)) return;
+	if(values.empty()) rEntity.externals.erase(rBehaviorName);
+	else rEntity.externals[rBehaviorName] = values;
 }
 
 /*

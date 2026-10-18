@@ -17,6 +17,8 @@
 #include <cctype>
 #include <format>
 #include <cstring>
+#include <filesystem>
+#include <system_error>
 
 namespace Graphics
 {
@@ -186,7 +188,7 @@ void PrefabPanel::spawn(PoolId prefabId_, PoolId& rSelectedEntity_, const Editor
 	SpawnParams params;
 	params.position = rCamera_.position + rCamera_.front * SpawnDistance;
 	params.what = "(editor)";
-	params.levelId = editor.currentLevel();
+	params.levelId = editor.hubWorldEntities ? UninitializedPoolId : editor.currentLevel();
 	PoolId id = spawnPrefab(prefabId_, getShaderId(rPrefab.game == SA_NINJA ? "SA" : "STH2005"), params);
 	if(id == UninitializedPoolId)
 	{
@@ -196,9 +198,10 @@ void PrefabPanel::spawn(PoolId prefabId_, PoolId& rSelectedEntity_, const Editor
 	this->message.clear();
 	rSelectedEntity_ = id;
 
-	/* The level owns it from now on, so it is saved with the level's edits and removed with the level. */
+	/* The level (in the HubWorld's Entities subtab, the HubWorld) owns it from now on, so it is saved with the level's edits and removed with the level. */
 	PoolId levelId = editor.currentLevel();
-	if(levelId != UninitializedPoolId) getLevel(levelId).entityIds.push_back(id);
+	if(editor.hubWorldEntities) editor.adoptEntity(id, true);
+	else if(levelId != UninitializedPoolId) getLevel(levelId).entityIds.push_back(id);
 	editor.recordCreated(id);
 }
 
@@ -442,6 +445,39 @@ void PrefabPanel::drawSearchResults()
 	if(!any) ImGui::TextUnformatted("No prefab matches.");
 }
 
+/* The level folders of Assets/Levels that hold <name>/<name>.json, the open one marked. A double click replaces the loaded level with it (Editor::loadLevel, unsaved edits are gone); dragging a row ("LEVEL" payload: the name) fills a level field of the inspector. */
+void PrefabPanel::drawLevels()
+{
+	ImGui::TextUnformatted("Double click or right click > Load loads the level alone; unsaved edits are lost. Drag onto a level field.");
+	PoolId openId = editor.currentLevel();
+	std::string openName = openId != UninitializedPoolId ? Globals::Game::levels.names[openId.id] : std::string();
+	std::vector<std::string> names;
+	std::error_code error;
+	for(const std::filesystem::directory_entry& rFile : std::filesystem::directory_iterator("Assets/Levels", error))
+	{
+		std::string name = rFile.path().filename().string();
+		if(rFile.is_directory() && std::filesystem::exists(rFile.path() / (name + ".json"))) names.push_back(name);
+	}
+	std::sort(names.begin(), names.end());
+	ImGui::BeginChild("LevelRows", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+	for(const std::string& rName : names)
+	{
+		if(ImGui::Selectable(rName.c_str(), rName == openName, ImGuiSelectableFlags_AllowDoubleClick) && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) editor.loadLevel(rName);
+		if(ImGui::BeginPopupContextItem("LevelMenu"))
+		{
+			if(ImGui::MenuItem("Load")) editor.loadLevel(rName);
+			ImGui::EndPopup();
+		}
+		if(ImGui::BeginDragDropSource())
+		{
+			ImGui::SetDragDropPayload("LEVEL", rName.c_str(), rName.size() + 1);
+			ImGui::TextUnformatted(rName.c_str());
+			ImGui::EndDragDropSource();
+		}
+	}
+	ImGui::EndChild();
+}
+
 /* Clear empties the shared log. Errors are red and may hold several lines (the traceback). A new message scrolls the list down only if it was at the bottom before, so reading old lines is not interrupted. */
 void PrefabPanel::drawOutput()
 {
@@ -485,7 +521,7 @@ void PrefabPanel::draw(PoolId& rSelectedEntity_, const EditorCamera& rCamera_)
 	ImGui::SetNextWindowPos(ImVec2(left, display.y - this->height));
 	ImGui::SetNextWindowSizeConstraints(ImVec2(width, 100.0f), ImVec2(width, display.y * 0.7f));
 	ImGui::SetNextWindowSize(ImVec2(width, this->height));
-	ImGui::Begin("Assets and prefabs", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
+	ImGui::Begin("Resources", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
 	this->height = ImGui::GetWindowSize().y;
 
 	ImGui::SetNextItemWidth(-1.0f);
@@ -524,6 +560,11 @@ void PrefabPanel::draw(PoolId& rSelectedEntity_, const EditorCamera& rCamera_)
 			if(filtering) this->drawSearchResults();
 			else this->drawBrowser();
 			ImGui::EndChild();
+			ImGui::EndTabItem();
+		}
+		if(ImGui::BeginTabItem("Levels"))
+		{
+			this->drawLevels();
 			ImGui::EndTabItem();
 		}
 		if(ImGui::BeginTabItem("Output"))

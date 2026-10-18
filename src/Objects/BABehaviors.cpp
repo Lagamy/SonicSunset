@@ -193,6 +193,7 @@ PoolId BABehaviors::applyBoundAreaData(const BoundAreaBehaviorData& rData_)
 	};
 
 	BABehavior behavior;
+	behavior.fields = rData_.fields;
 	for(const std::string& rTag : rData_.tags) behavior.tags.push_back(tagNamed(rTag));
 	for(const std::string& rTag : rData_.collidesWith) behavior.availableCollisions.insert(tagNamed(rTag).id);
 	for(const BoundAreaRule& rRule : rData_.onTouch)
@@ -209,6 +210,17 @@ PoolId BABehaviors::applyBoundAreaData(const BoundAreaBehaviorData& rData_)
 	if(id == UninitializedPoolId) return Globals::Game::behaviors.add(rData_.name.c_str(), std::move(behavior));
 	Globals::Game::behaviors[id] = std::move(behavior);
 	return id;
+}
+
+const std::vector<ExternalField>& BABehaviors::fieldsOf(PoolId behaviorId_) const
+{
+	static const std::vector<ExternalField> none;
+	if(behaviorId_ == UninitializedPoolId) return none;
+	const std::string& rName = Globals::Game::behaviors[behaviorId_].fields;
+	if(rName.empty()) return none;
+	auto found = Globals::Game::entityBehaviorTypes.nameToId.find(rName);
+	if(found == Globals::Game::entityBehaviorTypes.nameToId.end()) return none;
+	return Globals::Game::entityBehaviorTypes[found->second].fields;
 }
 
 const BoundAreaBehaviorData* BABehaviors::scriptBehaviorNamed(const std::string& rName_) const
@@ -357,6 +369,7 @@ nlohmann::json boundAreaJson(const BoundAreaData& rData_)
 	{
 		nlohmann::json entry = {{"name", rBehavior.name}, {"tags", rBehavior.tags}, {"collidesWith", rBehavior.collidesWith}, {"onTouch", nlohmann::json::array()}};
 		for(const BoundAreaRule& rRule : rBehavior.onTouch) entry["onTouch"].push_back({{"function", rRule.function}, {"tags", rRule.tags}});
+		if(!rBehavior.fields.empty()) entry["fields"] = rBehavior.fields;
 		file["behaviors"].push_back(entry);
 	}
 	return file;
@@ -378,6 +391,7 @@ void BABehaviors::loadBoundAreas(const std::string& path_)
 			behavior.name = rEntry.at("name").get<std::string>();
 			behavior.tags = readNames(rEntry, "tags");
 			behavior.collidesWith = readNames(rEntry, "collidesWith");
+			behavior.fields = rEntry.value("fields", std::string());
 			for(const nlohmann::json& rRule : rEntry.value("onTouch", nlohmann::json::array()))
 			{
 				behavior.onTouch.push_back(BoundAreaRule{rRule.at("function").get<std::string>(), readNames(rRule, "tags")});

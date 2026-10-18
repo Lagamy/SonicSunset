@@ -2,11 +2,13 @@
 #include "Globals.h"
 #include "API.h"
 #include "Editor.h"
+#include "Level.h"
 #include "Prefab.h"
 #include "imgui.h"
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <filesystem>
 #include <system_error>
 #include <format>
@@ -57,13 +59,15 @@ void EntityListPanel::draw()
 	ImGui::Begin("Level", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
 	this->width = ImGui::GetWindowSize().x;
 
+	/* Which view is in use is set again every frame by the tab item that is drawn: Level (neither), HubWorld > Levels (hubWorldView) or HubWorld > Entities (hubWorldEntities). */
+	editor.hubWorldView = false;
+	editor.hubWorldEntities = false;
 	ImGuiTabItemFlags levelFlags = this->focusLevelTab ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
 	this->focusLevelTab = false;
 	if(ImGui::BeginTabBar("ViewTabs"))
 	{
 		if(ImGui::BeginTabItem("Level", nullptr, levelFlags))
 		{
-			editor.mapView = false;
 			if(ImGui::BeginTabBar("LeftTabs"))
 			{
 				if(ImGui::BeginTabItem("Entities"))
@@ -85,18 +89,20 @@ void EntityListPanel::draw()
 			}
 			ImGui::EndTabItem();
 		}
-		if(ImGui::BeginTabItem("Map"))
+		/* The HubWorld tab exists only while the levels are loaded as a HubWorld; without it the Level view is the one in use. */
+		if(Globals::Game::hubWorld.loadedAsHub && ImGui::BeginTabItem("HubWorld"))
 		{
-			editor.mapView = true;
-			if(ImGui::BeginTabBar("MapTabs"))
+			if(ImGui::BeginTabBar("HubWorldTabs"))
 			{
 				if(ImGui::BeginTabItem("Levels"))
 				{
-					this->drawMap();
+					editor.hubWorldView = true;
+					this->drawHubWorld();
 					ImGui::EndTabItem();
 				}
 				if(ImGui::BeginTabItem("Entities"))
 				{
+					editor.hubWorldEntities = true;
 					this->drawEntities();
 					ImGui::EndTabItem();
 				}
@@ -149,22 +155,22 @@ void EntityListPanel::toggleSelected(PoolId id_)
 	this->selected = id_;
 }
 
-void EntityListPanel::drawMap()
+void EntityListPanel::drawHubWorld()
 {
-	/* The levels in RAM, the active one marked; one not in Map.json is shown too (it is only loaded beside the active one if it has an entry). */
-	if(editor.mapSelected.empty()) editor.mapSelected = Globals::Game::map.active;
+	/* The levels in RAM, the active one marked; one not in HubWorld.json is shown too (it is only loaded beside the active one if it has an entry). */
+	if(editor.hubWorldSelected.empty()) editor.hubWorldSelected = Globals::Game::hubWorld.active;
 	for(uint32_t i = 0; i < Globals::Game::levels.objects.size(); i++)
 	{
 		if(!Globals::Game::levels.alive[i]) continue;
 		const std::string& rName = Globals::Game::levels.objects[i].name;
-		bool inMap = Globals::Game::map.find(rName) != nullptr;
-		std::string label = std::format("{}{}{}", rName, rName == Globals::Game::map.active ? " (active)" : "", inMap ? "" : " (not in map)");
-		if(ImGui::Selectable(label.c_str(), editor.mapIsSelected(rName))) editor.selectMapLevel(rName, ImGui::GetIO().KeyShift || ImGui::GetIO().KeyCtrl);
+		bool inHubWorld = Globals::Game::hubWorld.find(rName) != nullptr;
+		std::string label = std::format("{}{}{}", rName, rName == Globals::Game::hubWorld.active ? " (active)" : "", inHubWorld ? "" : " (not in HubWorld)");
+		if(ImGui::Selectable(label.c_str(), editor.hubWorldIsSelected(rName))) editor.selectHubWorldLevel(rName, ImGui::GetIO().KeyShift || ImGui::GetIO().KeyCtrl);
 	}
 	ImGui::Separator();
 
-	/* The level folders that are not loaded yet; picking one adds it to the map and loads it (Editor::addLevelToMap). */
-	if(ImGui::BeginCombo("Add level to map", "pick a level"))
+	/* The level folders that are not loaded yet; picking one adds it to the HubWorld and loads it (Editor::addLevelToHubWorld). */
+	if(ImGui::BeginCombo("Add level to HubWorld", "pick a level"))
 	{
 		std::error_code error;
 		std::vector<std::string> names;
@@ -176,13 +182,13 @@ void EntityListPanel::drawMap()
 		std::sort(names.begin(), names.end());
 		for(const std::string& rName : names)
 		{
-			MapLevel place;
+			HubWorldLevel place;
 			if(editor.levelPlace(rName, place)) continue;
-			if(ImGui::Selectable(rName.c_str())) editor.addLevelToMap(rName);
+			if(ImGui::Selectable(rName.c_str())) editor.addLevelToHubWorld(rName);
 		}
 		ImGui::EndCombo();
 	}
-	ImGui::TextWrapped("Drag the handles in the scene or use the Inspector. Changes are written to Map.json when let go.");
+	ImGui::TextWrapped("Drag the handles in the scene or use the Inspector. Changes are written to HubWorld.json when let go.");
 }
 
 void EntityListPanel::drawCameraSettings()
@@ -201,10 +207,41 @@ void EntityListPanel::drawCameraSettings()
 
 void EntityListPanel::drawEntities()
 {
-	if(ImGui::Button("Add camera"))
+	if(ImGui::Button("Add empty entity"))
 	{
-		glm::vec3 position = editor.camera.position;
-		editor.recordCreated(editor.addLevelCamera("Camera", position));
+		this->creating = 1;
+		std::snprintf(this->newEntityName, sizeof(this->newEntityName), "Entity");
+		ImGui::OpenPopup("NewEntityName");
+	}
+	ImGui::SameLine();
+	bool addCamera = ImGui::Button("Add camera");
+	if(addCamera)
+	{
+		this->creating = 2;
+		std::snprintf(this->newEntityName, sizeof(this->newEntityName), "Camera");
+		ImGui::OpenPopup("NewEntityName");
+	}
+
+	/* The name popup of both buttons: Enter or Create makes the entity at the editor camera's position, in the current level (in the HubWorld's Entities subtab, owned by the HubWorld), selected and undoable. An empty name is not accepted. */
+	if(ImGui::BeginPopup("NewEntityName"))
+	{
+		ImGui::TextUnformatted(this->creating == 1 ? "Entity name" : "Camera name");
+		if(ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+		bool enter = ImGui::InputText("##newEntityName", this->newEntityName, sizeof(this->newEntityName), ImGuiInputTextFlags_EnterReturnsTrue);
+		if((ImGui::Button("Create") || enter) && this->newEntityName[0] != '\0')
+		{
+			glm::vec3 position = editor.camera.position;
+			PoolId id;
+			if(this->creating == 1)
+			{
+				id = addEntity(this->newEntityName, position);
+				editor.adoptEntity(id, editor.hubWorldEntities);
+			}
+			else id = editor.addLevelCamera(this->newEntityName, position, UninitializedPoolId, editor.hubWorldEntities);
+			editor.recordCreated(id);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndPopup();
 	}
 	ImGui::SameLine();
 	if(ImGui::Button("New folder"))
@@ -292,6 +329,7 @@ void EntityListPanel::drawEntities()
 	for(uint32_t i = 0; i < Globals::Game::entities.objects.size(); i++)
 	{
 		if(!Globals::Game::entities.alive[i]) continue;
+		if(editor.inHubWorldList(Globals::Game::entities.objects[i]) != editor.hubWorldEntities) continue;
 		if(!levelShown(Globals::Game::entities.objects[i].levelId)) continue;
 		liveCount++;
 		if(filtering)
@@ -414,6 +452,11 @@ void EntityListPanel::drawEntities()
 				}
 				if(ImGui::BeginPopupContextItem("EntityMenu"))
 				{
+					if(ImGui::MenuItem("Delete", "Del"))
+					{
+						if(!inSelection) this->selectOnly(id);
+						editor.deleteSelected();
+					}
 					if(ImGui::BeginMenu("Move to folder"))
 					{
 						for(int folder = 0; folder < static_cast<int>(this->userFolders.size()); folder++)

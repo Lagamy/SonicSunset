@@ -21,7 +21,7 @@ constexpr float RingFraction = 0.85f;
 constexpr int RingSegments = 64;
 constexpr float MinScale = 0.01f;
 
-/* A level's map rotation (Level::mapMatrix: degrees, rotY * rotX * rotZ) as a matrix, and back (the angles of that product read off its entries). */
+/* A level's HubWorld rotation (Level::hubWorldMatrix: degrees, rotY * rotX * rotZ) as a matrix, and back (the angles of that product read off its entries). */
 glm::mat4 levelRotation(const glm::vec3& rDegrees_)
 {
 	glm::mat4 matrix(1.0f);
@@ -452,8 +452,8 @@ PoolId pickEntity(GLFWwindow* pWindow_, const Camera& rCamera_, double x_, doubl
 }
 
 /*
-A level is hit where the ray enters its bounds box (Level::boundsMin / boundsMax), taken in the level's own space: the ray goes back through the inverse of the map place and the level's position, so a turned level has a turned box. Of the levels the ray hits the nearest entry wins.
-Used by the Map view for a level that has no entity under the click.
+A level is hit where the ray enters its bounds box (Level::boundsMin / boundsMax), taken in the level's own space: the ray goes back through the inverse of the HubWorld place and the level's position, so a turned level has a turned box. Of the levels the ray hits the nearest entry wins.
+Used by the HubWorld view for a level that has no entity under the click.
 */
 PoolId pickLevel(GLFWwindow* pWindow_, const Camera& rCamera_, double x_, double y_)
 {
@@ -466,7 +466,7 @@ PoolId pickLevel(GLFWwindow* pWindow_, const Camera& rCamera_, double x_, double
 		if(!Globals::Game::levels.alive[i]) continue;
 		const Level& rLevel = Globals::Game::levels.objects[i];
 		if(!rLevel.hasBounds) continue;
-		glm::mat4 inverse = glm::inverse(rLevel.mapMatrix());
+		glm::mat4 inverse = glm::inverse(rLevel.hubWorldMatrix());
 		glm::vec3 origin = glm::vec3(inverse * glm::vec4(ray.origin, 1.0f)) - rLevel.position;
 		glm::vec3 direction = glm::vec3(inverse * glm::vec4(ray.direction, 0.0f));
 		float tMin = 0.0f;

@@ -16,13 +16,14 @@ struct BATag
 
 namespace Scripting
 {
-void callInteraction(int scriptFunction_, PoolId parentEntity_, PoolId contactEntity_);
+void callInteraction(int scriptFunction_, PoolId parentEntity_, PoolId contactEntity_, int parentShape_);
 }
 
 /*
 What one behaviour does when its collision touches a collision with a tag: called with the PoolId of the entity that owns the behaviour's collision (parent) and the one it touched (contact). It is either a C++
 function (pFunction) or a script function (scriptFunction: a Lua registry reference, see Scripting.h); a function pointer converts to one, so a behaviour lists `{tag, &function}`. Two are equal if they are the
-same function, which is how the collision system calls each once.
+same function, which is how the collision system calls each once. A script function also gets the index of the parent's shape that touched (-1 for a level's triangle, which has no shape), from which Scripting::callInteraction
+makes the table of the shape's values (BABehavior::fields); a C++ function does not get it.
 */
 struct BAInteraction
 {
@@ -47,16 +48,16 @@ struct BAInteraction
 		return this->pFunction == rOther_.pFunction && this->scriptFunction == rOther_.scriptFunction;
 	}
 
-	void call(PoolId parentEntity_, PoolId contactEntity_) const
+	void call(PoolId parentEntity_, PoolId contactEntity_, int parentShape_) const
 	{
 		if(this->pFunction != nullptr) this->pFunction(parentEntity_, contactEntity_);
-		else if(this->scriptFunction != 0) Scripting::callInteraction(this->scriptFunction, parentEntity_, contactEntity_);
+		else if(this->scriptFunction != 0) Scripting::callInteraction(this->scriptFunction, parentEntity_, contactEntity_, parentShape_);
 	}
 };
 
 /*
 A script function a bound area can name as an onTouch function, stored in Globals::Game::boundAreaFunctions (a PoolMap named by the function, so the editor and the project's data file find one by name): the
-Lua registry reference of fn(parent, contact) (sf.onTouch) and the file that registered it, as the Lua chunk name without the '@', so the editor can list a script file's functions. The reference stays the same
+Lua registry reference of fn(parent, contact, shape) (sf.onTouch) and the file that registered it, as the Lua chunk name without the '@', so the editor can list a script file's functions. The reference stays the same
 when the name is registered again (the function behind it is replaced), so a behaviour built from it keeps working.
 */
 struct BoundAreaFunction
@@ -77,12 +78,15 @@ What a collision is and does, stored in Globals::Game::behaviors (a PoolMap name
   a level's collision), once per gameplay tick and pair however many triangles or shapes overlap, after the entities have been moved. The function must not hold on to references into the entities pool.
 For an overlap of A and B each side looks the other's tags up in its own two maps; if neither side finds one the overlap is skipped, so nothing branches on what B is.
 Entity against entity (CollisionSystem.cpp): see updateEntityContacts.
+- fields: the name of an entity behaviour (Globals::Game::entityBehaviorTypes, made by sf.behavior) whose fields describe the per-shape values of this behaviour (Physics::CollisionShape::values; empty = none). The BoundArea tab shows them under the
+  shape's behaviour and the script functions get them as the table `shape`. Looked up by name when needed (BABehaviors::fieldsOf).
 */
 struct BABehavior
 {
 	std::vector<PoolId> tags = {};
 	std::unordered_set<uint32_t> availableCollisions = {};
 	std::unordered_map<uint32_t, std::vector<BAInteraction>> availableInteractions = {};
+	std::string fields = {};
 
 	/* True if this behaviour is stopped by a tag the other has. */
 	bool collidesWith(const BABehavior& rOther_) const

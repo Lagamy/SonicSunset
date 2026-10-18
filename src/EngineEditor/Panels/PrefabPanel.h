@@ -87,6 +87,7 @@ private:
 	void drawGrid(const std::vector<PoolId>& rList_);
 	void drawNewMenu();
 	/* The "Output" tab: the messages of the scripts (Scripting/ScriptLog.h), errors red; follows the newest unless scrolled up. */
+	void drawLevels();
 	void drawOutput();
 	void drawTile(PoolId prefabId_, float cellWidth_);
 	void spawn(PoolId prefabId_, PoolId& rSelectedEntity_, const EditorCamera& rCamera_);

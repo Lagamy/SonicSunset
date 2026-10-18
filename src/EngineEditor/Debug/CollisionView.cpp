@@ -319,7 +319,7 @@ static void addShapeLines(AddLine addLine_, const Physics::CollisionShape& rShap
 
 void CollisionView::draw(const Camera& rCamera_)
 {
-	if(!editor.active || (!this->enabled && !this->boundAreaTabActive && this->markers.empty() && !editor.mapView)) return;
+	if(!editor.active || (!this->enabled && !this->boundAreaTabActive && this->markers.empty() && !editor.hubWorldView)) return;
 
 	std::vector<PoolId> levelCollisions;
 	if(this->enabled)

@@ -9,7 +9,7 @@
 #include "Text.h"
 #include "LevelLoader.h"
 #include "Level.h"
-#include "Map.h"
+#include "HubWorld.h"
 #include "EntityListPanel.h"
 #include "InspectorPanel.h"
 #include "PrefabPanel.h"
@@ -35,39 +35,42 @@ struct Editor
 	/* True while in the editor (the start state), false while playing (the Play button, setPlaying). */
 	bool active = true;
 
-	/* The editor's Map view (the Map tab, docs/TODO.md level map): every level is drawn and picked. False = the Level view, where only the active level is (levelShown). Has no effect while playing. */
-	bool mapView = false;
+	/* The editor's HubWorld view (the HubWorld tab, docs/TODO.md level HubWorld): every level is drawn and picked. False = the Level view, where only the active level is (levelShown). Has no effect while playing. */
+	bool hubWorldView = false;
+
+	/* The HubWorld tab's Entities subtab is shown (EntityListPanel::draw sets it each frame): every level is drawn like in the HubWorld view, but the gizmo, the Inspector and picking work on entities, and the entity list holds only the entities the HubWorld owns (Entity::hubWorldOwned). Entities made now belong to the HubWorld. */
+	bool hubWorldEntities = false;
 
 	/*
-	The Map view's state: the name of the level whose place is being edited (mapSelected; empty = the active level) and whether Map.json has a change that is not written yet (mapDirty; set while a drag or the inspector widget runs). When it is let go (processInputs) the change counts as made (mapUnsaved), and Map.json is written only by Save (saveAllLevels, Ctrl+S).
-	levelPlace gives a loaded level's place (the map's entry, else the level's own); false if no level of the name is loaded. setLevelPlace gives the level the place (Level::setMapTransform) and keeps it in the map (Map::set).
+	The HubWorld view's state: the name of the level whose place is being edited (hubWorldSelected; empty = the active level) and whether HubWorld.json has a change that is not written yet (hubWorldDirty; set while a drag or the inspector widget runs). When it is let go (processInputs) the change counts as made (hubWorldUnsaved), and HubWorld.json is written only by Save (saveAllLevels, Ctrl+S).
+	levelPlace gives a loaded level's place (the HubWorld's entry, else the level's own); false if no level of the name is loaded. setLevelPlace gives the level the place (Level::setHubWorldTransform) and keeps it in the HubWorld (HubWorld::set).
 	*/
-	std::string mapSelected;
-	bool mapDirty = false;
-	bool mapUnsaved = false;
+	std::string hubWorldSelected;
+	bool hubWorldDirty = false;
+	bool hubWorldUnsaved = false;
 
 	/*
-	The levels selected besides mapSelected (a multi-selection: Shift or Ctrl click in the Map tab's list, Shift click in the scene) and the helpers on them. mapSelection lists the selected names, mapSelected first (empty = the active level's name), loaded levels only. selectMapLevel selects one
-	level, or with additive_ adds or removes it from the selection (a newly added one becomes mapSelected). The Map view's gizmo moves and turns them all as a group; Ctrl+Z undoes such a change.
+	The levels selected besides hubWorldSelected (a multi-selection: Shift or Ctrl click in the HubWorld tab's list, Shift click in the scene) and the helpers on them. hubWorldSelection lists the selected names, hubWorldSelected first (empty = the active level's name), loaded levels only. selectHubWorldLevel selects one
+	level, or with additive_ adds or removes it from the selection (a newly added one becomes hubWorldSelected). The HubWorld view's gizmo moves and turns them all as a group; Ctrl+Z undoes such a change.
 	*/
-	std::vector<std::string> mapExtraSelected;
+	std::vector<std::string> hubWorldExtraSelected;
 
-	std::vector<std::string> mapSelection() const;
-	bool mapIsSelected(const std::string& name_) const;
-	void selectMapLevel(const std::string& name_, bool additive_);
-	bool levelPlace(const std::string& name_, MapLevel& rPlace_) const;
-	void setLevelPlace(const MapLevel& rPlace_);
+	std::vector<std::string> hubWorldSelection() const;
+	bool hubWorldIsSelected(const std::string& name_) const;
+	void selectHubWorldLevel(const std::string& name_, bool additive_);
+	bool levelPlace(const std::string& name_, HubWorldLevel& rPlace_) const;
+	void setLevelPlace(const HubWorldLevel& rPlace_);
 
-	/* The Map tab's "Choose as active": loads the level as the File menu's Load level does (the map's other levels beside it, unsaved edits gone) and goes back to the Level tab. */
+	/* The HubWorld tab's "Choose as active": loads the HubWorld with the level active (as Load HubWorld does, unsaved edits gone) and goes back to the Level tab. */
 	void chooseActive(const std::string& name_);
 
-	/* The Map tab's "Add level to map": the level gets an entry (at the origin) and, if it is not loaded, is loaded in its place beside the others; the map is written. Says in fileMessage how it went. */
-	void addLevelToMap(const std::string& name_);
+	/* The HubWorld tab's "Add level to HubWorld": the level gets an entry (at the origin) and, if it is not loaded, is loaded in its place beside the others; the HubWorld is written. Says in fileMessage how it went. */
+	void addLevelToHubWorld(const std::string& name_);
 
 	/*
-	The Map tab's "Remove from map": the level's entry goes (Map.json is written). A loaded level that is not the active one is unloaded; the active one stays and goes back to the origin, as it would load without an entry. The Level's file and edits are not touched.
+	The HubWorld tab's "Remove from HubWorld": the level's entry goes (HubWorld.json is written). A loaded level that is not the active one is unloaded; the active one stays and goes back to the origin, as it would load without an entry. The Level's file and edits are not touched.
 	*/
-	void removeLevelFromMap(const std::string& name_);
+	void removeLevelFromHubWorld(const std::string& name_);
 
 	/*
 	While playing, a level was reset in place (Loading::resetLevel): puts back what Play kept of it (keptLevels, as Stop does), the entities' state and the edits made in the editor before Play. Nothing if Play kept no level of that name.
@@ -107,8 +110,10 @@ struct Editor
 	bool tabPressed = false;
 	bool escapePressed = false;
 	bool cPressed = false;
+	bool homePressed = false;
 	bool vPressed = false;
 	bool zPressed = false;
+	bool deletePressed = false;
 	bool yPressed = false;
 	bool sPressed = false;
 	bool leftPressed = false;
@@ -136,8 +141,11 @@ struct Editor
 	/* File > Save Source Game Level: makes the level as it is now the level's source (Loading::saveSourceLevel: Restore Source Game Level returns to it from now on), then loads the level again from its files so the editor holds exactly what a load gives (the selection is cleared, the players go to the start); says in fileMessage how it went. */
 	void saveSourceLevel();
 
-	/* Replaces the loaded level with Levels/<name>/<name>.json (the scripts' resetGame with a name: the level, the players at its start); what was edited and not saved in the old level is gone. */
-	void loadLevel(const std::string& levelName_);
+	/* Replaces the loaded level with Levels/<name>/<name>.json (the scripts' resetGame with a name: the level, the players at its start); what was edited and not saved in the old level is gone. pMode_ is resetGame's: "level" loads it alone (File > Load level), "hub" loads the HubWorld with it active, nullptr keeps the kind of the last load. */
+	void loadLevel(const std::string& levelName_, const char* pMode_ = "level");
+
+	/* File > Load HubWorld: loads every level of HubWorld.json at its place (the first entry is the active level); unsaved edits are gone. Says in fileMessage if HubWorld.json has no levels. */
+	void loadHubWorld();
 
 	std::string fileMessage;
 
@@ -221,7 +229,7 @@ struct Editor
 		Transform transform;
 	};
 
-	/* Ctrl+C: what was copied, a prefab entity (prefabId, entity) or a camera entity (isCamera, camera). */
+	/* Ctrl+C: what was copied, a prefab entity (prefabId, entity), a camera entity (isCamera, camera) or a plain entity (isPlain, entity). */
 	struct CopiedCamera
 	{
 		glm::vec3 front;
@@ -242,6 +250,10 @@ struct Editor
 	{
 		bool valid = false;
 		bool isCamera = false;
+		/* A plain entity (no prefab, no camera: Add empty entity); entity holds its state. */
+		bool isPlain = false;
+		/* The HubWorld owns the copy's entity (a plain or prefab entity of the HubWorld tab), not the level. */
+		bool hubWorld = false;
 		std::string name;
 		PoolId prefabId = UninitializedPoolId;
 		KeptEntity entity;
@@ -249,7 +261,7 @@ struct Editor
 	};
 	/*
 	One step of Ctrl+Z / Ctrl+Y: either the entity's transform to give back (created false; before), or an entity the editor made (created true: undoing removes it, and keeps its state in snapshot so that redoing makes it again, with a new PoolId).
-	Two more kinds, both with created false: a group (group not empty: the transforms several entities had before one change, entity / before are the first of them) and a map step (places not empty: the places the levels had in the Map view, given back by name).
+	Two more kinds, both with created false: a group (group not empty: the transforms several entities had before one change, entity / before are the first of them) and a HubWorld step (places not empty: the places the levels had in the HubWorld view, given back by name).
 	*/
 	struct UndoAction
 	{
@@ -258,15 +270,15 @@ struct Editor
 		Transform before;
 		Clipboard snapshot;
 		std::vector<EntityTransform> group;
-		std::vector<MapLevel> places;
+		std::vector<HubWorldLevel> places;
 	};
 	std::vector<UndoAction> undoStack;
 	std::vector<UndoAction> redoStack;
 
-	/* The selected entities (primary first) and their transforms as last seen (trackTransform), and in the Map view the selected levels' places: a different value once nothing is being dragged is a finished change. */
+	/* The selected entities (primary first) and their transforms as last seen (trackTransform), and in the HubWorld view the selected levels' places: a different value once nothing is being dragged is a finished change. */
 	std::vector<EntityTransform> tracked;
 	bool trackedBusy = false;
-	std::vector<MapLevel> trackedPlaces;
+	std::vector<HubWorldLevel> trackedPlaces;
 	bool trackedPlacesBusy = false;
 
 	Clipboard clipboard;
@@ -283,16 +295,34 @@ struct Editor
 		std::vector<KeptPrefab> prefabs;
 		std::vector<Clipboard> cameras;
 
+		/* Level::removed at Play: Stop removes these again. */
+		std::vector<uint32_t> removed;
+
 		/* The place in Level::entityIds of each of cameras, at Play. */
 		std::vector<uint32_t> cameraIndices;
 	};
 	std::vector<KeptLevel> keptLevels;
 
-	/* A camera entity at a position that the level owns (it is saved with the level, Loading::saveLevelEdits "cameras"); the Add camera button and paste make cameras with it. */
-	PoolId addLevelCamera(const char* name_, const glm::vec3& rPosition_, PoolId levelId_ = UninitializedPoolId);
+	/* The HubWorld's entities at Play (snapshotOf, hubWorld true) and the ids they had; Stop makes them again (the HubWorld's entities are not in a level). */
+	std::vector<Clipboard> keptHubWorld;
+	std::vector<PoolId> keptHubWorldIds;
+
+	/* A camera entity at a position that the level owns (it is saved with the level, Loading::saveLevelEdits "cameras"), or the HubWorld (hubWorld_: HubWorld.json "entities"); the Add camera button and paste make cameras with it. */
+	PoolId addLevelCamera(const char* name_, const glm::vec3& rPosition_, PoolId levelId_ = UninitializedPoolId, bool hubWorld_ = false);
 
 	/* Puts an entity the editor made (Add camera, paste) on the undo stack and selects it. */
 	void recordCreated(PoolId entityId_);
+
+	/* Gives a new entity (addEntity, spawnPrefab) to its owner: the HubWorld (hubWorld_ true: Entity::hubWorldOwned, HubWorld::entityIds; HubWorld.json is unsaved) or the level (levelId_, else the current one: Entity::levelId, Level::entityIds). */
+	void adoptEntity(PoolId entityId_, bool hubWorld_, PoolId levelId_ = UninitializedPoolId);
+
+	/* Whether the entity is listed in the HubWorld's Entities subtab (and not in the Level tab): the HubWorld's own, and, while the levels are loaded as a HubWorld, the ones no level owns (the main camera, the players, a script's spawns). With a single level loaded they are in the Level tab. */
+	bool inHubWorldList(const Entity& rEntity_) const;
+
+	/* Delete key and the entity list's Delete: removes the selected entities that can go, each one an undo step (Ctrl+Z makes it again from a snapshot). The entities a level makes from the game's data can't (message in fileMessage). */
+	void deleteSelected();
+	/* Takes an entity out of its owner and the pool (the owner's list, selection, spatial index); the part that Delete and undoing a create share. */
+	void removeEntity(PoolId entityId_);
 
 	/* Ctrl+Z undoes the latest step, Ctrl+Y does the latest undone one again; a new step empties the redo ones. Both stacks are dropped when the level is loaded again or restored; Play and Stop keep them (the entities made again at Stop are renamed in the steps, giveKeptLevel). */
 	void undo();
@@ -309,7 +339,7 @@ struct Editor
 	/* Makes the undo and redo steps that name entity old_ name new_ (the entity was made again by Stop or a level reset). */
 	void renameUndoEntity(PoolId old_, PoolId new_);
 
-	/* Looks at the selected entities (the selected levels in the Map view) once a frame (processInputs, in the editor): when a transform (place) differs from the last one seen and no gizmo drag or ImGui widget is being held, pushes the old ones (a whole drag is one step; several changed entities or levels are one step). */
+	/* Looks at the selected entities (the selected levels in the HubWorld view) once a frame (processInputs, in the editor): when a transform (place) differs from the last one seen and no gizmo drag or ImGui widget is being held, pushes the old ones (a whole drag is one step; several changed entities or levels are one step). */
 	void trackTransform();
 	void trackPlaces();
 

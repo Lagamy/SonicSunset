@@ -23,7 +23,7 @@ Undo (Ctrl+Z) is Editor's: it notices a finished change of the selected entity's
 /* The entity under the window position (x_, y_) in pixels as the camera sees it (UninitializedPoolId if none), for click to select (Editor::processInputs). Entities are picked by the exact box of their model, else by their bounding sphere, see the definition. */
 PoolId pickEntity(GLFWwindow* pWindow_, const Camera& rCamera_, double x_, double y_);
 
-/* The level whose bounds box the ray under the window position enters first (UninitializedPoolId if none), for click to select in the Map view when no entity is under the cursor. */
+/* The level whose bounds box the ray under the window position enters first (UninitializedPoolId if none), for click to select in the HubWorld view when no entity is under the cursor. */
 PoolId pickLevel(GLFWwindow* pWindow_, const Camera& rCamera_, double x_, double y_);
 
 /* Where the ray under the window position (x_, y_) crosses the horizontal plane at height_ (world y), within the camera's far plane. False if the ray is level with the plane, points away from it or the window has no size. Used by Editor's paste. */
@@ -53,8 +53,8 @@ struct Gizmo
 	void draw(const Camera& rCamera_, const std::vector<PoolId>& rGroup_);
 
 	/*
-	The same handles on the places of one or more levels in the map (the Map view, Editor::mapView): positions and rotations in degrees (MapLevel), Move and Rotate only (Scale has no handles), the group acting as above (one level: about its own position). updateLevels changes the values
-	being dragged and returns true when it did; the caller applies them (Level::setMapTransform) and keeps them (Map::set).
+	The same handles on the places of one or more levels in the HubWorld (the HubWorld view, Editor::hubWorldView): positions and rotations in degrees (HubWorldLevel), Move and Rotate only (Scale has no handles), the group acting as above (one level: about its own position). updateLevels changes the values
+	being dragged and returns true when it did; the caller applies them (Level::setHubWorldTransform) and keeps them (HubWorld::set).
 	*/
 	bool updateLevels(GLFWwindow* pWindow_, const Camera& rCamera_, std::vector<glm::vec3>& rPositions_, std::vector<glm::vec3>& rRotationsDegrees_, bool uiWantsMouse_, bool cameraDragging_);
 	void drawLevels(const Camera& rCamera_, const std::vector<glm::vec3>& rPositions_);

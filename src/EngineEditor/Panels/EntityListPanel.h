@@ -10,13 +10,13 @@
 namespace Graphics
 {
 /*
-The entity list of the editor: a panel along the left edge of the window with every live entity of Globals::Game::entities as a tree of folders (a name filter above, a button that adds a camera, one that makes a folder), clipped so the thousands
+The entity list of the editor: a panel along the left edge of the window with every live entity of Globals::Game::entities as a tree of folders (a name filter above, buttons that add an empty entity or a camera, each asking for the name in a popup, and one that makes a folder), clipped so the thousands
 of a level's objects cost nothing. Clicking an entity selects it: selected is what the InspectorPanel shows. Drawn by DebugUI::draw, inside its ImGui frame; Editor::entityList.
 The built-in folders group the entities by the prefab they were made from (Entity::prefabId): the game's folder, then the prefab's group (Prefab.h), then the prefab; entities without a prefab are in "Ungrouped". They are rebuilt every frame and
 cannot be changed. The user's folders (New folder; inside the selected one, if a user folder is selected) hold entities the user put there, by the entity's right click menu "Move to folder" or by dragging the entity onto a folder (onto a built-in folder: back to its own); an entity in a
 user folder is shown there instead of in its built-in one. Right click on a user folder deletes it (its folders move up, its entities go back to their built-in folders). While the filter has text every folder is open and those with no match are hidden.
 The folders are the panel's own state: they are not saved and the scripts cannot see them.
-The window is titled "Level" and has two tabs, Level (the tabs below) and Map (subtabs Levels = drawMap and Entities = drawEntities; sets Editor::mapView, the Map view of docs/TODO.md's level map: every level is drawn and picked, the Inspector edits the selected level's place in the map). A second tab, "Collision", is the collision view's panel (CollisionView::drawPanel, the same as the Debug window's); a third, "Editor camera", holds the settings of Editor::camera (EditorCamera.h); Editor saves them with the panel sizes.
+The window is titled "Level" and has two tabs, Level (the tabs below) and HubWorld (subtabs Levels = drawHubWorld, which sets Editor::hubWorldView, the HubWorld view of docs/TODO.md's level HubWorld: every level is drawn and picked, the Inspector edits the selected level's place in the HubWorld; and Entities = drawEntities, which sets Editor::hubWorldEntities and lists the entities the HubWorld owns, Entity::hubWorldOwned, and, while loaded as a HubWorld, the ones no level owns (the main camera, the players: Editor::inHubWorldList); the Level tab lists the entities of the levels only). Right click > Delete and the Delete key remove the selected entities (Editor::deleteSelected). A second tab, "Collision", is the collision view's panel (CollisionView::drawPanel, the same as the Debug window's); a third, "Editor camera", holds the settings of Editor::camera (EditorCamera.h); Editor saves them with the panel sizes.
 */
 struct EntityListPanel
 {
@@ -37,14 +37,14 @@ struct EntityListPanel
 	/* The panel's width in pixels: the user drags its right edge, draw() reads the result back, and Editor saves it (editor_settings.json). The other panels are laid out around it. */
 	float width = 300.0f;
 
-	/* Set by the Map tab's "Choose as active" (Editor::chooseActive): the Level tab is selected on the next draw. */
+	/* Set by the HubWorld tab's "Choose as active" (Editor::chooseActive): the Level tab is selected on the next draw. */
 	bool focusLevelTab = false;
 
 	void draw();
 
 private:
-	/* The Map tab: the loaded levels (a click selects one, the Inspector edits its place) and the add-level combo. */
-	void drawMap();
+	/* The HubWorld tab: the loaded levels (a click selects one, the Inspector edits its place) and the add-level combo. */
+	void drawHubWorld();
 	/* The tabs of the panel: the entity tree, (Collision is drawn by CollisionView) and the settings of the editor camera (look, pan, zoom and fly speeds). */
 	void drawEntities();
 	void drawCameraSettings();
@@ -66,5 +66,9 @@ private:
 	std::unordered_set<std::string> openFolders;
 
 	char newFolderName[48] = "Folder";
+
+	/* The name popup of "Add empty entity" (creating 1) and "Add camera" (2): the name being typed. */
+	int creating = 0;
+	char newEntityName[64] = "";
 };
 }

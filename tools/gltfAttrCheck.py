@@ -1,5 +1,5 @@
 """
-Step 0 of the Map.gltf authoring pipeline (docs/TODO.md): reads the file a modelling tool re-exported from the probe written by
+Step 0 of the HubWorld.gltf authoring pipeline (docs/TODO.md): reads the file a modelling tool re-exported from the probe written by
 tools/gltfAttrWrite.py and reports which per-vertex fields (source id, flag, source vertex index, original position) survived and with
 which values, for both encodings (custom attributes _SRC / _SRCFLAG / _SRCIDX / _ORIG, and the TEXCOORD_1..3 fallback).
 

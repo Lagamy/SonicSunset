@@ -36,9 +36,9 @@ bool loadFile(const char* path_, const char* root_ = ScriptsRoot);
 /* Runs Assets/External/Scripts/main.lua, the project's own scripts, then every .lua below its Entity/ and BoundArea/ folders (the folder says what a script is: sf.behavior or sf.onTouch; in name order) (main.lua includes the others with sf.include, which inside an External script is relative to Assets/External/Scripts); a missing file is nothing to load. Call right after Scripts/main.lua: the behaviours must be registered before registerPrefabs and the Changed files name them. */
 void loadExternalScripts();
 
-/* Called by the gameplay system and the collision system for a function a script registered (a Lua registry reference). callBehavior also gets the behaviour's PoolId: before its first call on an entity it writes the behaviour's declared fields into the entity's state table (EntityBehavior::fields). */
+/* Called by the gameplay system and the collision system for a function a script registered (a Lua registry reference). callBehavior also gets the behaviour's PoolId: before its first call on an entity it writes the behaviour's declared fields into the entity's state table (EntityBehavior::fields). callInteraction also gets the index of the parent's shape that touched (-1: none, a level's triangle): the function's third argument is the table of that shape's values, nil for -1. */
 void callBehavior(int scriptFunction_, PoolId entityId_, PoolId behaviorId_);
-void callInteraction(int scriptFunction_, PoolId parentEntity_, PoolId contactEntity_);
+void callInteraction(int scriptFunction_, PoolId parentEntity_, PoolId contactEntity_, int parentShape_);
 
 /*
 A prefab's behaviour (sf.prefabBehavior(prefabName, fn), prefabName as Globals::Game::prefabs names it, e.g. "SADX/SPRING"): setupPrefab calls fn(entity, placement) for every entity spawnPrefab makes from that prefab, placement the SET record as a table {type, rotation = {x, y, z}
@@ -57,9 +57,9 @@ void processPendingUnloads();
 
 /*
 Puts the game back to its start (the editor's Stop): the script's global resetGame(unloaded) is called with false, where it asks for its level to go (sf.unloadLevel); the removal is done here, now, since no tick
-is running; then resetGame(true) is called, where it loads the level again and puts the players at its start. Both calls get the level's name as a second argument (nil without a name): a name makes the script load that level instead (the editor's File > Load level). A script that does not define resetGame is skipped.
+is running; then resetGame(true) is called, where it loads the level again and puts the players at its start. Both calls get the level's name as a second argument (nil without a name): a name makes the script load that level instead (the editor's File > Load level). A third argument says the kind of load: "level" (the level alone), "hub" (every level of HubWorld.json; the name is then the active one, empty = the first entry), nil = the kind the last load was (Stop). A script that does not define resetGame is skipped.
 */
-void resetGame(const char* pLevelName_ = nullptr);
+void resetGame(const char* pLevelName_ = nullptr, const char* pMode_ = nullptr);
 
 /*
 Says that a level reset (Loading::resetLevel, or the editor's restore of what Play added) removed the entity oldId_ and made newId_ in its place from the same recipe. A script that kept the old handle (a global, the player's state) reaches the new entity with it: the functions of `sf`

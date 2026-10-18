@@ -101,6 +101,8 @@ struct Entity
 	PoolId prefabId = UninitializedPoolId;
 	/* The level the entity belongs to (Globals::Game::levels; set by spawnPrefab from SpawnParams::levelId, UninitializedPoolId = none: players, script spawns, cameras): its prefab edits are the level's own sets (Prefab::inLevels); without one the active level's apply. */
 	PoolId levelId = UninitializedPoolId;
+	/* The HubWorld owns the entity (HubWorld::entityIds, HubWorld.json "entities"), not a level: levelId stays none. The editor lists it in the HubWorld tab only. */
+	bool hubWorldOwned = false;
 	/* The texture the editor gave the entity in place of its model's own (setEntityTexture in API.h; Default = none). defaultTexture is the model's own disc texture (discTexture), remembered by the first change so Default can put it back; hasDefaultTexture says it was. */
 	TextureChoice textureChoice;
 	std::string defaultTexture;

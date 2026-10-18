@@ -28,18 +28,8 @@ struct DebugUI
 	/* The text field of the File menu's Save as. */
 	char saveAsName[64] = "";
 
-	/* The fields of the File menu's New level; engine 0 = sadx, 1 = sth2005, 2 = gltf. */
+	/* The fields of the File menu's New level (a glTF level). */
 	char newName[64] = "";
-	int newEngine = 0;
-	char newShader[32] = "SA";
-	char newLandTableRel[128] = "";
-	char newLandTableOffset[32] = "";
-	char newTextures[128] = "";
-	char newTxd[64] = "";
-	char newSections[512] = "";
-	char newPlacementFiles[256] = "";
-	char newEntityTable[64] = "";
-	char newTypeNames[64] = "";
 	char newModel[256] = "";
 	char newCollisions[512] = "";
 
@@ -58,8 +48,5 @@ struct DebugUI
 	char importModelPath[256] = "";
 	char importModelName[64] = "";
 	bool importModelInLevel = false;
-
-	/* The level files found when Load level was chosen. */
-	std::vector<std::string> levelNames;
 };
 }

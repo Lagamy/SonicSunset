@@ -176,8 +176,80 @@ glm::mat4 readRotation(const Json& rValue_)
 	return glm::mat4(glm::make_mat3(values.data()));
 }
 
-/* A bound area shape as the level file has it: every field of Physics::CollisionShape, the behaviour by name (null: none). */
-nlohmann::ordered_json writeShape(const Physics::CollisionShape& rShape_)
+/*
+One external value as the level file has it (writeExternals, writeShape): a number, bool or string as itself, a vec3 as [x, y, z], an entity as its index in the level (Level::editIndexOf; null if it is not one of the level's or no level is given) and a prefab as its
+name (null: none).
+*/
+nlohmann::ordered_json writeExternalValue(ExternalType type_, const ExternalValue& rValue_, const Level* pLevel_)
+{
+	switch(type_)
+	{
+	case ExternalType::Number:
+		return rValue_.number;
+	case ExternalType::Bool:
+		return rValue_.flag;
+	case ExternalType::String:
+		return rValue_.text;
+	case ExternalType::Vec3:
+		return nlohmann::ordered_json::array({rValue_.vector.x, rValue_.vector.y, rValue_.vector.z});
+	case ExternalType::Entity:
+	{
+		int32_t index = pLevel_ ? pLevel_->editIndexOf(rValue_.entity) : -1;
+		return index >= 0 ? nlohmann::ordered_json(index) : nlohmann::ordered_json(nullptr);
+	}
+	case ExternalType::Prefab:
+	{
+		auto& rPrefabs = Globals::Game::prefabs;
+		bool exists = rValue_.prefab.id < rPrefabs.objects.size() && rPrefabs.alive[rValue_.prefab.id] && rPrefabs.generation[rValue_.prefab.id] == rValue_.prefab.generation;
+		return exists ? nlohmann::ordered_json(rPrefabs.names[rValue_.prefab.id]) : nlohmann::ordered_json(nullptr);
+	}
+	case ExternalType::Level:
+		return rValue_.text.empty() ? nlohmann::ordered_json(nullptr) : nlohmann::ordered_json(rValue_.text);
+	}
+	return nullptr;
+}
+
+/* The value of writeExternalValue; an entity is left as entityIndex. Throws std::exception if the JSON does not fit the type (or names an unknown prefab). */
+ExternalValue readExternalValue(ExternalType type_, const Json& rJson_)
+{
+	ExternalValue value;
+	switch(type_)
+	{
+	case ExternalType::Number:
+		value.number = rJson_.get<double>();
+		break;
+	case ExternalType::Bool:
+		value.flag = rJson_.get<bool>();
+		break;
+	case ExternalType::String:
+		value.text = rJson_.get<std::string>();
+		break;
+	case ExternalType::Vec3:
+		value.vector = readPosition(rJson_);
+		break;
+	case ExternalType::Entity:
+		if(!rJson_.is_null()) value.entityIndex = rJson_.get<int32_t>();
+		break;
+	case ExternalType::Prefab:
+		if(!rJson_.is_null())
+		{
+			auto prefab = Globals::Game::prefabs.nameToId.find(rJson_.get<std::string>());
+			if(prefab == Globals::Game::prefabs.nameToId.end()) throw std::runtime_error("unknown prefab " + rJson_.get<std::string>());
+			value.prefab = prefab->second;
+		}
+		break;
+	case ExternalType::Level:
+		if(!rJson_.is_null()) value.text = rJson_.get<std::string>();
+		break;
+	}
+	return value;
+}
+
+/*
+A bound area shape as the level file has it: every field of Physics::CollisionShape, the behaviour by name (null: none), and "values" (only when the shape has any): the shape's external values of the fields its behaviour declares (writeExternalValue; an entity
+needs pLevel_, without one it is null), then what the file had that no field took (valuesKept) as it was.
+*/
+nlohmann::ordered_json writeShape(const Physics::CollisionShape& rShape_, const Level* pLevel_ = nullptr)
 {
 	nlohmann::ordered_json json;
 	json["kind"] = rShape_.kind;
@@ -193,6 +265,17 @@ nlohmann::ordered_json writeShape(const Physics::CollisionShape& rShape_)
 	json["angle"] = nlohmann::ordered_json::array({rShape_.angle.x, rShape_.angle.y, rShape_.angle.z});
 	if(rShape_.behavior == UninitializedPoolId) json["behavior"] = nullptr;
 	else json["behavior"] = Globals::Game::behaviors.names[rShape_.behavior.id];
+	nlohmann::ordered_json values = nlohmann::ordered_json::object();
+	for(const ExternalField& rField : Globals::Game::baBehaviors.fieldsOf(rShape_.behavior))
+	{
+		auto found = rShape_.values.find(rField.name);
+		if(found != rShape_.values.end()) values[rField.name] = writeExternalValue(rField.type, found->second, pLevel_);
+	}
+	for(const auto& [fieldName, rText] : rShape_.valuesKept)
+	{
+		if(!values.contains(fieldName)) values[fieldName] = nlohmann::ordered_json::parse(rText);
+	}
+	if(!values.empty()) json["values"] = values;
 	return json;
 }
 
@@ -283,6 +366,29 @@ Physics::CollisionShape readShape(const Json& rJson_, const std::string& rLevel_
 		if(found == Globals::Game::behaviors.nameToId.end()) fprintf(stderr, "Level '%s': an edit names the unknown collision behaviour '%s'.\n", rLevel_.c_str(), name.c_str());
 		else shape.behavior = found->second;
 	}
+	if(rJson_.contains("values"))
+	{
+		const std::vector<ExternalField>& rDeclared = Globals::Game::baBehaviors.fieldsOf(shape.behavior);
+		for(const auto& [fieldName, rJson] : rJson_.at("values").items())
+		{
+			auto field = std::find_if(rDeclared.begin(), rDeclared.end(), [&](const ExternalField& rField_) { return rField_.name == fieldName; });
+			if(field == rDeclared.end())
+			{
+				fprintf(stderr, "Level '%s': a shape sets the value '%s', which its behaviour does not declare; kept as it is.\n", rLevel_.c_str(), fieldName.c_str());
+				shape.valuesKept[fieldName] = rJson.dump();
+				continue;
+			}
+			try
+			{
+				shape.values[fieldName] = readExternalValue(field->type, rJson);
+			}
+			catch(const std::exception& rError)
+			{
+				fprintf(stderr, "Level '%s': the shape value '%s' does not fit: %s; kept as it is.\n", rLevel_.c_str(), fieldName.c_str(), rError.what());
+				shape.valuesKept[fieldName] = rJson.dump();
+			}
+		}
+	}
 	return shape;
 }
 
@@ -346,9 +452,9 @@ void readPrefabEdits(PrefabEdits& rEdits_, const Json& rJson_, const std::string
 
 /*
 The external field values of an entity (Entity::externals) as the level file has them: {"<behaviour>": {"<field>": value}}, a number, bool or string as itself, a vec3 as [x, y, z], an entity as its index in the level (Level::editIndexOf; null if it is not
-one of the level's) and a prefab as its name (null: none). A value of a declared field is written from its type; one the file had that no declared field took is written back from Entity::externalsKept.
+one of the level's or no level is given) and a prefab as its name (null: none). A value of a declared field is written from its type; one the file had that no declared field took is written back from Entity::externalsKept.
 */
-nlohmann::ordered_json writeExternals(const Entity& rEntity_, const Level& rLevel_)
+nlohmann::ordered_json writeExternals(const Entity& rEntity_, const Level* pLevel_)
 {
 	nlohmann::ordered_json json = nlohmann::ordered_json::object();
 	for(const auto& [behaviorName, rValues] : rEntity_.externals)
@@ -360,35 +466,7 @@ nlohmann::ordered_json writeExternals(const Entity& rEntity_, const Level& rLeve
 		{
 			auto found = rValues.find(rField.name);
 			if(found == rValues.end()) continue;
-			const ExternalValue& rValue = found->second;
-			switch(rField.type)
-			{
-			case ExternalType::Number:
-				fields[rField.name] = rValue.number;
-				break;
-			case ExternalType::Bool:
-				fields[rField.name] = rValue.flag;
-				break;
-			case ExternalType::String:
-				fields[rField.name] = rValue.text;
-				break;
-			case ExternalType::Vec3:
-				fields[rField.name] = nlohmann::ordered_json::array({rValue.vector.x, rValue.vector.y, rValue.vector.z});
-				break;
-			case ExternalType::Entity:
-			{
-				int32_t index = rLevel_.editIndexOf(rValue.entity);
-				fields[rField.name] = index >= 0 ? nlohmann::ordered_json(index) : nlohmann::ordered_json(nullptr);
-				break;
-			}
-			case ExternalType::Prefab:
-			{
-				auto& rPrefabs = Globals::Game::prefabs;
-				bool exists = rValue.prefab.id < rPrefabs.objects.size() && rPrefabs.alive[rValue.prefab.id] && rPrefabs.generation[rValue.prefab.id] == rValue.prefab.generation;
-				fields[rField.name] = exists ? nlohmann::ordered_json(rPrefabs.names[rValue.prefab.id]) : nlohmann::ordered_json(nullptr);
-				break;
-			}
-			}
+			fields[rField.name] = writeExternalValue(rField.type, found->second, pLevel_);
 		}
 		if(!fields.empty()) json[behaviorName] = fields;
 	}
@@ -430,32 +508,7 @@ void readExternals(const Json& rJson_, Entity& rEntity_, const std::string& rLev
 			ExternalValue value;
 			try
 			{
-				switch(field->type)
-				{
-				case ExternalType::Number:
-					value.number = rJson.get<double>();
-					break;
-				case ExternalType::Bool:
-					value.flag = rJson.get<bool>();
-					break;
-				case ExternalType::String:
-					value.text = rJson.get<std::string>();
-					break;
-				case ExternalType::Vec3:
-					value.vector = readPosition(rJson);
-					break;
-				case ExternalType::Entity:
-					if(!rJson.is_null()) value.entityIndex = rJson.get<int32_t>();
-					break;
-				case ExternalType::Prefab:
-					if(!rJson.is_null())
-					{
-						auto prefab = Globals::Game::prefabs.nameToId.find(rJson.get<std::string>());
-						if(prefab == Globals::Game::prefabs.nameToId.end()) throw std::runtime_error("unknown prefab " + rJson.get<std::string>());
-						value.prefab = prefab->second;
-					}
-					break;
-				}
+				value = readExternalValue(field->type, rJson);
 			}
 			catch(const std::exception& rError)
 			{
@@ -472,6 +525,31 @@ void readExternals(const Json& rJson_, Entity& rEntity_, const std::string& rLev
 std::string sourcePrefabFile(const std::string& rRoot_, const std::string& rLevel_, const std::string& rPoolName_)
 {
 	return rRoot_ + rLevel_ + "/SourceGamePrefabs/" + rPoolName_ + "/prefab.json";
+}
+
+/* The properties an "added" entry (and a HubWorld entity's "state") gives an entity beyond its prefab and position: the whole behaviour list, the shapes, model, texture and external values, whichever the entry has. */
+void applyEntityState(PoolId id, const Json& rAdded, const std::string& name_)
+{
+	/* An added entity keeps its whole list: there is no source to take a difference from. */
+	if(rAdded.contains("behaviors"))
+	{
+		std::vector<PoolId> behaviorIds;
+		for(const Json& rName : rAdded.at("behaviors"))
+		{
+			PoolId behaviorId = findBehavior(rName.get<std::string>(), name_);
+			if(behaviorId != UninitializedPoolId) behaviorIds.push_back(behaviorId);
+		}
+		setEntityBehaviors(id, behaviorIds);
+	}
+	if(rAdded.contains("shapes"))
+	{
+		std::vector<Physics::CollisionShape> shapes;
+		for(const Json& rShape : rAdded.at("shapes")) shapes.push_back(readShape(rShape, name_));
+		setEntityShapes(id, shapes);
+	}
+	if(rAdded.contains("mesh")) applyMeshChoice(id, readMeshChoice(rAdded.at("mesh")), name_);
+	if(rAdded.contains("texture")) applyTextureChoice(id, readTextureChoice(rAdded.at("texture")), name_);
+	if(rAdded.contains("externals")) readExternals(rAdded.at("externals"), getEntity(id), name_);
 }
 
 /* One entry of an "added" list (see addEditedEntities): the entity of its prefab at its position with the properties the entry gives (behaviours, bound area, rotation, scale, model, texture, external values), or UninitializedPoolId, reported on stderr, if the prefab is unknown or it can't be made. */
@@ -491,28 +569,9 @@ PoolId makeAddedEntity(const Json& rAdded, const std::string& name_, PoolId shad
 	PoolId id = spawnPrefab(prefab->second, shaderId_, params);
 	if(id == UninitializedPoolId) return id;
 
-	/* An added entity keeps its whole list: there is no source to take a difference from. */
-	if(rAdded.contains("behaviors"))
-	{
-		std::vector<PoolId> behaviorIds;
-		for(const Json& rName : rAdded.at("behaviors"))
-		{
-			PoolId behaviorId = findBehavior(rName.get<std::string>(), name_);
-			if(behaviorId != UninitializedPoolId) behaviorIds.push_back(behaviorId);
-		}
-		setEntityBehaviors(id, behaviorIds);
-	}
-	if(rAdded.contains("shapes"))
-	{
-		std::vector<Physics::CollisionShape> shapes;
-		for(const Json& rShape : rAdded.at("shapes")) shapes.push_back(readShape(rShape, name_));
-		setEntityShapes(id, shapes);
-	}
 	if(rAdded.contains("rotation")) getEntity(id).setRotation(readRotation(rAdded.at("rotation")));
 	if(rAdded.contains("scale")) getEntity(id).setScale(readPosition(rAdded.at("scale")));
-	if(rAdded.contains("mesh")) applyMeshChoice(id, readMeshChoice(rAdded.at("mesh")), name_);
-	if(rAdded.contains("texture")) applyTextureChoice(id, readTextureChoice(rAdded.at("texture")), name_);
-	if(rAdded.contains("externals")) readExternals(rAdded.at("externals"), getEntity(id), name_);
+	applyEntityState(id, rAdded, name_);
 	return id;
 }
 
@@ -759,6 +818,57 @@ void addLevelCameras(Level& rLevel_, const Json& rCameras_, const std::string& n
 	}
 }
 
+/*
+"entities" (top level of the level file, written by File > Save and Save Source Game Level): [{"name", "position", "rotation", "scale", "behaviors": [names], "shapes": [shapes]}], the plain entities the editor added to the level (Add empty entity: no prefab, no model, no camera). Each is made after the edits (addEntity) and owned by the level, so it is removed with the level
+and by Restore Source Game Level. "rotation" (nine numbers) and "scale" are written only when they are not the identity. A broken entry is reported on stderr and skipped.
+*/
+PoolId makeLevelEntity(const Json& rEntry_, const std::string& name_, PoolId levelId_)
+{
+	PoolId id = addEntity(rEntry_.value("name", std::string("Entity")).c_str(), readPosition(rEntry_.at("position")));
+	getEntity(id).levelId = levelId_;
+	std::vector<PoolId> behaviorIds;
+	for(const Json& rName : rEntry_.value("behaviors", Json::array()))
+	{
+		PoolId behaviorId = findBehavior(rName.get<std::string>(), name_);
+		if(behaviorId != UninitializedPoolId) behaviorIds.push_back(behaviorId);
+	}
+	if(!behaviorIds.empty()) setEntityBehaviors(id, behaviorIds);
+	std::vector<Physics::CollisionShape> shapes;
+	for(const Json& rShape : rEntry_.value("shapes", Json::array())) shapes.push_back(readShape(rShape, name_));
+	if(!shapes.empty()) setEntityShapes(id, shapes);
+	if(rEntry_.contains("rotation")) getEntity(id).setRotation(readRotation(rEntry_.at("rotation")));
+	if(rEntry_.contains("scale")) getEntity(id).setScale(readPosition(rEntry_.at("scale")));
+	return id;
+}
+
+void addLevelEntities(Level& rLevel_, const Json& rEntities_, const std::string& name_)
+{
+	uint32_t listIndex = 0;
+	for(const Json& rEntry : rEntities_)
+	{
+		EntityRecipe recipe;
+		recipe.kind = EntityRecipe::Kind::Plain;
+		recipe.addedIndex = listIndex++;
+		try
+		{
+			rLevel_.addBuilt(makeLevelEntity(rEntry, name_, rLevel_.selfId), recipe);
+		}
+		catch(const std::exception& rError)
+		{
+			fprintf(stderr, "Level '%s': an entity of the file can't be made: %s\n", name_.c_str(), rError.what());
+		}
+	}
+}
+
+/*
+"removed" (top level of the level file, written by File > Save and Save Source Game Level): [index], the level's own entities (the game's data and the file's "source", by their index in Level::entityIds) the editor deleted. Each is removed after the edits are applied and keeps its slot, so the other indices stay as they are.
+An index that is not a source entity is ignored. Restore Source Game Level does not bring them back; taking the index out of the list (or the key) and loading the level again does.
+*/
+void removeSourceEntities(Level& rLevel_, const Json& rRemoved_)
+{
+	for(const Json& rIndex : rRemoved_) rLevel_.removeSourceEntity(rIndex.get<uint32_t>());
+}
+
 void applyEdits(Level& rLevel_, const std::string& name_, PoolId shaderId_)
 {
 	Json file;
@@ -768,14 +878,16 @@ void applyEdits(Level& rLevel_, const std::string& name_, PoolId shaderId_)
 	rLevel_.markSourceEntities();
 	if(file.contains("edits")) applyEditSet(rLevel_, file.at("edits"), name_, shaderId_, false);
 	if(file.contains("cameras")) addLevelCameras(rLevel_, file.at("cameras"), name_);
+	if(file.contains("entities")) addLevelEntities(rLevel_, file.at("entities"), name_);
+	if(file.contains("removed")) removeSourceEntities(rLevel_, file.at("removed"));
 }
 }
 
 namespace
 {
 /*
-Fills a level that addLevel made (or that resetLevel emptied): its name, External prefabs, the instance, collision and placed entities from the recipe, the file's edits, and last its place in the map. Throws what the steps throw; the caller decides what a failed level becomes.
-With keepInstance_ the level still has its instance, collision and External assets (resetLevel destroyed only its entities): those steps are skipped and the place in the map is applied from the unmoved state the new entities are in. Not for a level that has none yet.
+Fills a level that addLevel made (or that resetLevel emptied): its name, External prefabs, the instance, collision and placed entities from the recipe, the file's edits, and last its place in the HubWorld. Throws what the steps throw; the caller decides what a failed level becomes.
+With keepInstance_ the level still has its instance, collision and External assets (resetLevel destroyed only its entities): those steps are skipped and the place in the HubWorld is applied from the unmoved state the new entities are in. Not for a level that has none yet.
 */
 void buildLevel(PoolId id_, const std::string& name_, Recipe& rRecipe_, bool keepInstance_ = false)
 {
@@ -815,25 +927,25 @@ void buildLevel(PoolId id_, const std::string& name_, Recipe& rRecipe_, bool kee
 	}
 	applyEdits(rLevel, name_, rRecipe_.shaderId);
 
-	/* The level was made and edited in its own coordinates; the map's place for it (Map.json) moves all of it, so its file's edits stay local (saveLevelEdits writes them back unmoved). */
-	glm::vec3 placedPosition = rLevel.mapPosition;
-	glm::vec3 placedRotation = rLevel.mapRotation;
+	/* The level was made and edited in its own coordinates; the HubWorld's place for it (HubWorld.json) moves all of it, so its file's edits stay local (saveLevelEdits writes them back unmoved). */
+	glm::vec3 placedPosition = rLevel.hubWorldPosition;
+	glm::vec3 placedRotation = rLevel.hubWorldRotation;
 	bool wasStale = rLevel.collisionStale;
 	if(keepInstance_)
 	{
-		/* The new entities are in local coordinates and the collision is already placed: the map place is taken off the level and put on again without moving the collision. */
-		rLevel.mapPosition = glm::vec3(0.0f);
-		rLevel.mapRotation = glm::vec3(0.0f);
+		/* The new entities are in local coordinates and the collision is already placed: the HubWorld place is taken off the level and put on again without moving the collision. */
+		rLevel.hubWorldPosition = glm::vec3(0.0f);
+		rLevel.hubWorldRotation = glm::vec3(0.0f);
 	}
-	if(const MapLevel* pPlace = Globals::Game::map.find(name_)) rLevel.setMapTransform(pPlace->position, pPlace->rotation, !keepInstance_);
+	if(const HubWorldLevel* pPlace = Globals::Game::hubWorld.loadedAsHub ? Globals::Game::hubWorld.find(name_) : nullptr) rLevel.setHubWorldTransform(pPlace->position, pPlace->rotation, !keepInstance_);
 	if(keepInstance_)
 	{
-		/* The collision is at the place it had before the reset; if the editor moved the level's place while playing (or was dragging it) it is put on the place the map file gives now. */
+		/* The collision is at the place it had before the reset; if the editor moved the level's place while playing (or was dragging it) it is put on the place the HubWorld file gives now. */
 		rLevel.collisionStale = false;
-		if(wasStale || placedPosition != rLevel.mapPosition || placedRotation != rLevel.mapRotation)
+		if(wasStale || placedPosition != rLevel.hubWorldPosition || placedRotation != rLevel.hubWorldRotation)
 		{
 			rLevel.collisionStale = true;
-			rLevel.commitMapCollision();
+			rLevel.commitHubWorldCollision();
 		}
 	}
 	rLevel.captureBaselines();
@@ -876,30 +988,198 @@ PoolId loadLevel(const std::string& name_)
 	return id;
 }
 
-PoolId loadMap(const std::string& activeName_)
+/* Removes the entities the HubWorld owns (the next load makes them again from HubWorld::entities). */
+static void removeHubWorldEntities()
 {
-	Map& rMap = Globals::Game::map;
-	for(PoolId id : rMap.loaded)
+	HubWorld& rHubWorld = Globals::Game::hubWorld;
+	for(PoolId id : rHubWorld.entityIds)
 	{
-		if(id.id < Globals::Game::levels.objects.size() && Globals::Game::levels.alive[id.id] && Globals::Game::levels.generation[id.id] == id.generation) Globals::Game::levels.remove(id);
-	}
-	rMap.loaded.clear();
+		if(!entityExists(id)) continue;
 
-	PoolId activeId = loadLevel(activeName_);
-	rMap.active = activeName_;
-	if(rMap.find(activeName_) == nullptr) return activeId;
-	for(const MapLevel& rEntry : rMap.levels)
+		/* A camera's render target is a pool object of its own that removing the camera does not free; makeLevelCamera made it for the entity. */
+		if(getEntity(id).cameraId != UninitializedPoolId)
+		{
+			PoolId targetId = Globals::Game::cameras[getEntity(id).cameraId].renderTargetId;
+			Pool<Graphics::RenderTarget>& rTargets = Globals::Game::renderTargets;
+			if(targetId != UninitializedPoolId && targetId.id < rTargets.alive.size() && rTargets.alive[targetId.id] && rTargets.generation[targetId.id] == targetId.generation) rTargets.remove(targetId);
+		}
+		Globals::Game::entities.remove(id);
+	}
+	rHubWorld.entityIds.clear();
+}
+
+/* Makes the entities of HubWorld.json: a plain entity, or an entity of its prefab, at its transform in HubWorld coordinates and with its saved state (applyEntityState), owned by the HubWorld (no level). One that can't be made is on stderr and skipped. */
+static void buildHubWorldEntities()
+{
+	HubWorld& rHubWorld = Globals::Game::hubWorld;
+	for(const HubWorldEntity& rEntry : rHubWorld.entities)
 	{
-		if(rEntry.name == activeName_) continue;
+		PoolId id = UninitializedPoolId;
+		Json state;
 		try
 		{
-			rMap.loaded.push_back(loadLevel(rEntry.name));
+			if(!rEntry.state.empty()) state = Json::parse(rEntry.state);
 		}
 		catch(const std::exception& rError)
 		{
-			fprintf(stderr, "Map: %s\n", rError.what());
+			fprintf(stderr, "HubWorld: entity '%s': its state is not read: %s\n", rEntry.name.c_str(), rError.what());
+			state = Json();
+		}
+
+		/* A camera entity: made like a level's camera ("camera" is that entry's format without the name and position). */
+		if(state.is_object() && state.contains("camera"))
+		{
+			try
+			{
+				Json cameraEntry = state.at("camera");
+				cameraEntry["name"] = rEntry.name;
+				cameraEntry["position"] = Json::array({rEntry.position.x, rEntry.position.y, rEntry.position.z});
+				id = makeLevelCamera(cameraEntry, UninitializedPoolId);
+			}
+			catch(const std::exception& rError)
+			{
+				fprintf(stderr, "HubWorld: camera '%s' can't be made: %s\n", rEntry.name.c_str(), rError.what());
+				continue;
+			}
+			getEntity(id).hubWorldOwned = true;
+			rHubWorld.entityIds.push_back(id);
+			continue;
+		}
+		if(rEntry.prefab.empty()) id = addEntity(rEntry.name.c_str(), rEntry.position);
+		else
+		{
+			auto found = Globals::Game::prefabs.nameToId.find(rEntry.prefab);
+			if(found == Globals::Game::prefabs.nameToId.end())
+			{
+				fprintf(stderr, "HubWorld: entity '%s': there is no prefab named '%s'\n", rEntry.name.c_str(), rEntry.prefab.c_str());
+				continue;
+			}
+			SpawnParams params;
+			params.position = rEntry.position;
+			params.rotation = glm::mat4(rEntry.rotation);
+			params.name = rEntry.name;
+			params.what = "(HubWorld)";
+			id = spawnPrefab(found->second, Graphics::shaders.nameToId.at(Globals::Game::prefabs[found->second].game == SA_NINJA ? "SA" : "STH2005"), params);
+			if(id == UninitializedPoolId)
+			{
+				fprintf(stderr, "HubWorld: entity '%s' of '%s' could not be made\n", rEntry.name.c_str(), rEntry.prefab.c_str());
+				continue;
+			}
+		}
+		Entity& rEntity = getEntity(id);
+		rEntity.setRotation(glm::mat4(rEntry.rotation));
+		rEntity.setScale(rEntry.scale);
+		rEntity.hubWorldOwned = true;
+		rHubWorld.entityIds.push_back(id);
+		if(!state.is_object()) continue;
+		try
+		{
+			applyEntityState(id, state, "HubWorld");
+		}
+		catch(const std::exception& rError)
+		{
+			fprintf(stderr, "HubWorld: entity '%s': its state is not applied: %s\n", rEntry.name.c_str(), rError.what());
 		}
 	}
+}
+
+#ifdef EDITOR
+void syncHubWorldEntities()
+{
+	HubWorld& rHubWorld = Globals::Game::hubWorld;
+	rHubWorld.entities.clear();
+	for(PoolId id : rHubWorld.entityIds)
+	{
+		if(!entityExists(id)) continue;
+		const Entity& rEntity = getEntity(id);
+		HubWorldEntity entry;
+		entry.name = Globals::Game::entities.names[id.id];
+		if(rEntity.prefabId != UninitializedPoolId) entry.prefab = Globals::Game::prefabs.names[rEntity.prefabId.id];
+		entry.position = rEntity.position;
+		entry.rotation = glm::mat3(rEntity.rotation);
+		entry.scale = rEntity.scale;
+
+		/* A camera entity keeps only its camera (the format of a level file's "cameras" entry, without the name and position). */
+		if(rEntity.cameraId != UninitializedPoolId)
+		{
+			const Camera& rCamera = Globals::Game::cameras[rEntity.cameraId];
+			nlohmann::ordered_json camera = {{"front", nlohmann::ordered_json::array({rCamera.front.x, rCamera.front.y, rCamera.front.z})}, {"yaw", rCamera.yaw}, {"pitch", rCamera.pitch}, {"fov", rCamera.fov}, {"near", rCamera.nearPlane}, {"far", rCamera.farPlane}, {"enabled", rCamera.enabled}};
+			if(Globals::Game::mainCamera == rEntity.cameraId) camera["main"] = true;
+			if(const Graphics::RenderTarget* pTarget = rCamera.renderTarget()) camera["renderTarget"] = {{"width", pTarget->width}, {"height", pTarget->height}};
+			entry.state = nlohmann::ordered_json{{"camera", camera}}.dump();
+			rHubWorld.entities.push_back(entry);
+			continue;
+		}
+
+		/* The entity's whole behaviour list and shapes, its field values, and its model and texture when they differ from what the prefab gives (a plain entity has none): an "added" entry's format, read by applyEntityState. */
+		nlohmann::ordered_json state = nlohmann::ordered_json::object();
+		nlohmann::ordered_json names = nlohmann::ordered_json::array();
+		if(rEntity.behaviorSetId != UninitializedPoolId)
+		{
+			for(PoolId behaviorId : Globals::Game::entityBehaviors[rEntity.behaviorSetId].behaviorIds) names.push_back(Globals::Game::entityBehaviorTypes.names[behaviorId.id]);
+		}
+		state["behaviors"] = names;
+		nlohmann::ordered_json shapes = nlohmann::ordered_json::array();
+		for(const Physics::CollisionShape& rShape : entityShapes(id)) shapes.push_back(writeShape(rShape));
+		state["shapes"] = shapes;
+		bool hasPrefab = rEntity.prefabId != UninitializedPoolId;
+		if(rEntity.meshChoice != (hasPrefab ? prefabMesh(Globals::Game::prefabs[rEntity.prefabId], UninitializedPoolId) : MeshChoice{})) state["mesh"] = writeMeshChoice(rEntity.meshChoice);
+		if(rEntity.textureChoice != (hasPrefab ? prefabTexture(Globals::Game::prefabs[rEntity.prefabId], UninitializedPoolId) : TextureChoice{})) state["texture"] = writeTextureChoice(rEntity.textureChoice);
+		nlohmann::ordered_json values = writeExternals(rEntity, nullptr);
+		if(!values.empty()) state["externals"] = values;
+		entry.state = state.dump();
+		rHubWorld.entities.push_back(entry);
+	}
+}
+#endif
+
+/* Removes the levels the last load made beside the active one, and the HubWorld's own entities. */
+static void removeHubWorldLoaded()
+{
+	HubWorld& rHubWorld = Globals::Game::hubWorld;
+	removeHubWorldEntities();
+	for(PoolId id : rHubWorld.loaded)
+	{
+		if(id.id < Globals::Game::levels.objects.size() && Globals::Game::levels.alive[id.id] && Globals::Game::levels.generation[id.id] == id.generation) Globals::Game::levels.remove(id);
+	}
+	rHubWorld.loaded.clear();
+}
+
+PoolId loadLevelAlone(const std::string& name_)
+{
+	HubWorld& rHubWorld = Globals::Game::hubWorld;
+	removeHubWorldLoaded();
+	rHubWorld.loadedAsHub = false;
+	PoolId id = loadLevel(name_);
+	rHubWorld.active = name_;
+	return id;
+}
+
+PoolId loadHubWorld(const std::string& activeName_)
+{
+	HubWorld& rHubWorld = Globals::Game::hubWorld;
+	if(rHubWorld.levels.empty()) throw std::runtime_error("HubWorld.json has no levels");
+	const std::string& rActive = activeName_.empty() ? rHubWorld.levels.front().name : activeName_;
+	removeHubWorldLoaded();
+
+	/* loadedAsHub is set before the active level is made: loadLevel gives a level its HubWorld place only then. */
+	rHubWorld.loadedAsHub = true;
+	PoolId activeId = loadLevel(rActive);
+	rHubWorld.active = rActive;
+	for(const HubWorldLevel& rEntry : rHubWorld.levels)
+	{
+		if(rEntry.name == rActive) continue;
+		try
+		{
+			rHubWorld.loaded.push_back(loadLevel(rEntry.name));
+		}
+		catch(const std::exception& rError)
+		{
+			fprintf(stderr, "HubWorld: %s\n", rError.what());
+		}
+	}
+	buildHubWorldEntities();
+	Globals::Game::spatialIndex.rebuild();
 	return activeId;
 }
 
@@ -907,7 +1187,7 @@ namespace
 {
 /*
 resetLevel's way of leaving the entities that did not change alone: of the entities the build made (Level::built), the ones that are not as the build left them (Level::entityChanged: moved, a script changed their state, destroyed, ...) are removed and made again from their recipe
-(EntityRecipe) with the file's edits for their index applied, at the map's place; the entities of the level that the build did not make (the editor's) are removed. An entity that holds a reference to a changed one (an external field naming it) is made again too, since the reference would name
+(EntityRecipe) with the file's edits for their index applied, at the HubWorld's place; the entities of the level that the build did not make (the editor's) are removed. An entity that holds a reference to a changed one (an external field naming it) is made again too, since the reference would name
 the old entity, and so on. Entities that did not change keep everything, the Lua state of their behaviours included (no setup runs again), which is the point: it is the cost of making all of them that the reset is trying to avoid.
 A level the editor's Play kept (Editor::keptLevels) gets, for the entities made again, the state the editor had at Play, and the entities the editor added are made again (Editor::restoreKeptEntities); the entities left alone were taken as baseline at Play.
 Returns false, with nothing changed, when the level has to be rebuilt whole: an entity that can't be made alone is changed (no recipe), the entities are not where the build put them, or (the editor's Play) an entity the file's edits added, or a camera of the file, has to be made again: its kept state is not
@@ -930,7 +1210,7 @@ bool resetEntitiesInPlace(PoolId levelId_, const std::string& name_, uint32_t& r
 	for(uint32_t i = 0; i < rLevel.builtCount; i++)
 	{
 		PoolId id = rLevel.entityIds[i];
-		if(id == UninitializedPoolId || !rLevel.entityChanged(id)) continue;
+		if(id == UninitializedPoolId || rLevel.isRemoved(i) || !rLevel.entityChanged(id)) continue;
 		if(rLevel.built.at(Level::builtKey(id)).recipe.kind == EntityRecipe::Kind::None) return false;
 		remake[i] = 1;
 	}
@@ -1029,6 +1309,20 @@ bool resetEntitiesInPlace(PoolId levelId_, const std::string& name_, uint32_t& r
 				}
 			}
 		}
+		else if(rRecipe.kind == EntityRecipe::Kind::Plain)
+		{
+			if(file.contains("entities") && file.at("entities").size() > rRecipe.addedIndex)
+			{
+				try
+				{
+					id = makeLevelEntity(file.at("entities")[rRecipe.addedIndex], name_, rLevel.selfId);
+				}
+				catch(const std::exception& rError)
+				{
+					fprintf(stderr, "LevelReset: an entity of level %s not made again: %s\n", name_.c_str(), rError.what());
+				}
+			}
+		}
 		else
 		{
 			const char* pSet = rRecipe.fromSource ? "source" : "edits";
@@ -1045,16 +1339,16 @@ bool resetEntitiesInPlace(PoolId levelId_, const std::string& name_, uint32_t& r
 		rRemade_++;
 	}
 
-	/* The per-entity edits for the new ones, then the map's place (the build made and edited the level in its own coordinates and placed it last). */
-	glm::mat4 place = rLevel.mapMatrix();
+	/* The per-entity edits for the new ones, then the HubWorld's place (the build made and edited the level in its own coordinates and placed it last). */
+	glm::mat4 place = rLevel.hubWorldMatrix();
 	glm::mat4 placeRotation = glm::mat4(glm::mat3(place));
 	for(uint32_t i : made)
 	{
 		PoolId id = rLevel.entityIds[i];
 		const EntityRecipe& rMadeRecipe = rLevel.built.at(Level::builtKey(id)).recipe;
 		PoolId shaderId = rMadeRecipe.shaderId;
-		if(rMadeRecipe.kind != EntityRecipe::Kind::Camera && file.contains("source")) applyEditSet(rLevel, file.at("source"), name_, shaderId, true, i);
-		if(rMadeRecipe.kind != EntityRecipe::Kind::Camera && file.contains("edits")) applyEditSet(rLevel, file.at("edits"), name_, shaderId, false, i);
+		if((rMadeRecipe.kind != EntityRecipe::Kind::Camera && rMadeRecipe.kind != EntityRecipe::Kind::Plain) && file.contains("source")) applyEditSet(rLevel, file.at("source"), name_, shaderId, true, i);
+		if((rMadeRecipe.kind != EntityRecipe::Kind::Camera && rMadeRecipe.kind != EntityRecipe::Kind::Plain) && file.contains("edits")) applyEditSet(rLevel, file.at("edits"), name_, shaderId, false, i);
 		Entity& rEntity = getEntity(id);
 		rEntity.setPosition(glm::vec3(place * glm::vec4(rEntity.position, 1.0f)));
 		rEntity.setRotation(placeRotation * rEntity.rotation);
@@ -1084,7 +1378,7 @@ void resetLevel(PoolId levelId_)
 		}
 		return;
 	}
-	/* Only the entities are rebuilt: the instance (the meshes and textures uploaded) and the collision stay, which was most of the cost of destroying the whole level (TODO, Level reset, step 5). What the editor changes in them while playing (the map place) is put back below; scripts change neither. */
+	/* Only the entities are rebuilt: the instance (the meshes and textures uploaded) and the collision stay, which was most of the cost of destroying the whole level (TODO, Level reset, step 5). What the editor changes in them while playing (the HubWorld place) is put back below; scripts change neither. */
 
 	/* What each entity of the build was (by its place in the level and its recipe), to tell a script's kept handle which new entity took its place once the build is done. */
 	struct BuiltIdentity
@@ -1336,8 +1630,8 @@ static nlohmann::ordered_json buildLevelEdits(const Level& rLevel)
 		return nlohmann::ordered_json::array({matrix[0].x, matrix[0].y, matrix[0].z, matrix[1].x, matrix[1].y, matrix[1].z, matrix[2].x, matrix[2].y, matrix[2].z});
 	};
 
-	/* The level's entities are in world coordinates (Level::mapMatrix is applied to them); the file keeps the level's own, so every position and rotation written goes back through the inverse of the level's place in the map. */
-	glm::mat4 toLocal = glm::inverse(rLevel.mapMatrix());
+	/* The level's entities are in world coordinates (Level::hubWorldMatrix is applied to them); the file keeps the level's own, so every position and rotation written goes back through the inverse of the level's place in the HubWorld. */
+	glm::mat4 toLocal = glm::inverse(rLevel.hubWorldMatrix());
 	auto localPoint = [&](const glm::vec3& rPoint_) { return glm::vec3(toLocal * glm::vec4(rPoint_, 1.0f)); };
 	auto localRotation = [&](const glm::mat4& rRotation_) { return glm::mat4(glm::mat3(toLocal)) * rRotation_; };
 	nlohmann::ordered_json moved = nlohmann::ordered_json::array();
@@ -1352,7 +1646,7 @@ static nlohmann::ordered_json buildLevelEdits(const Level& rLevel)
 		{
 			if(rEntity.position != rLevel.sourcePositions[i]) moved.push_back({{"index", i}, {"position", position(localPoint(rEntity.position))}, {"source", position(localPoint(rLevel.sourcePositions[i]))}});
 			if(rEntity.rotation != rLevel.sourceRotations[i] || rEntity.scale != rLevel.sourceScales[i]) transforms.push_back({{"index", i}, {"rotation", rotation(localRotation(rEntity.rotation))}, {"scale", position(rEntity.scale)}});
-			nlohmann::ordered_json values = writeExternals(rEntity, rLevel);
+			nlohmann::ordered_json values = writeExternals(rEntity, &rLevel);
 			if(!values.empty()) externals.push_back({{"index", i}, {"values", values}});
 		}
 		else if(rEntity.prefabId != UninitializedPoolId)
@@ -1363,13 +1657,13 @@ static nlohmann::ordered_json buildLevelEdits(const Level& rLevel)
 				for(PoolId behaviorId : Globals::Game::entityBehaviors[rEntity.behaviorSetId].behaviorIds) names.push_back(Globals::Game::entityBehaviorTypes.names[behaviorId.id]);
 			}
 			nlohmann::ordered_json shapes = nlohmann::ordered_json::array();
-			for(const Physics::CollisionShape& rShape : entityShapes(rEntity.selfId)) shapes.push_back(writeShape(rShape));
+			for(const Physics::CollisionShape& rShape : entityShapes(rEntity.selfId)) shapes.push_back(writeShape(rShape, &rLevel));
 			added.push_back({{"prefab", Globals::Game::prefabs.names[rEntity.prefabId.id]}, {"position", position(localPoint(rEntity.position))}, {"behaviors", names}, {"shapes", shapes}});
 			if(rEntity.rotation != glm::mat4(1.0f)) added.back()["rotation"] = rotation(localRotation(rEntity.rotation));
 			if(rEntity.scale != glm::vec3(1.0f)) added.back()["scale"] = position(rEntity.scale);
 			if(rEntity.meshChoice != prefabMesh(Globals::Game::prefabs[rEntity.prefabId], rLevel.selfId)) added.back()["mesh"] = writeMeshChoice(rEntity.meshChoice);
 			if(rEntity.textureChoice != prefabTexture(Globals::Game::prefabs[rEntity.prefabId], rLevel.selfId)) added.back()["texture"] = writeTextureChoice(rEntity.textureChoice);
-			nlohmann::ordered_json values = writeExternals(rEntity, rLevel);
+			nlohmann::ordered_json values = writeExternals(rEntity, &rLevel);
 			if(!values.empty()) added.back()["externals"] = values;
 		}
 	}
@@ -1419,7 +1713,7 @@ static nlohmann::ordered_json buildLevelEdits(const Level& rLevel)
 		if(currentShapes != expectedShapes)
 		{
 			nlohmann::ordered_json shapeList = nlohmann::ordered_json::array();
-			for(const Physics::CollisionShape& rShape : currentShapes) shapeList.push_back(writeShape(rShape));
+			for(const Physics::CollisionShape& rShape : currentShapes) shapeList.push_back(writeShape(rShape, &rLevel));
 			shapes.push_back({{"index", i}, {"shapes", shapeList}});
 		}
 
@@ -1448,7 +1742,7 @@ static nlohmann::ordered_json buildLevelCameras(const Level& rLevel)
 {
 	nlohmann::ordered_json cameras = nlohmann::ordered_json::array();
 	auto vector = [](const glm::vec3& rValue_) { return nlohmann::ordered_json::array({rValue_.x, rValue_.y, rValue_.z}); };
-	glm::mat4 toLocal = glm::inverse(rLevel.mapMatrix());
+	glm::mat4 toLocal = glm::inverse(rLevel.hubWorldMatrix());
 	for(uint32_t i = rLevel.sourceEntityCount; i < rLevel.entityIds.size(); i++)
 	{
 		if(!entityExists(rLevel.entityIds[i])) continue;
@@ -1462,6 +1756,36 @@ static nlohmann::ordered_json buildLevelCameras(const Level& rLevel)
 		cameras.push_back(entry);
 	}
 	return cameras;
+}
+
+/* The "entities" list of the level as it is now: its plain entities after the source ones (no prefab, no camera: the editor's Add empty entity). The inverse of addLevelEntities; empty when there are none. */
+static nlohmann::ordered_json buildLevelEntities(const Level& rLevel)
+{
+	nlohmann::ordered_json entities = nlohmann::ordered_json::array();
+	auto vector = [](const glm::vec3& rValue_) { return nlohmann::ordered_json::array({rValue_.x, rValue_.y, rValue_.z}); };
+	glm::mat4 toLocal = glm::inverse(rLevel.hubWorldMatrix());
+	for(uint32_t i = rLevel.sourceEntityCount; i < rLevel.entityIds.size(); i++)
+	{
+		if(!entityExists(rLevel.entityIds[i])) continue;
+		const Entity& rEntity = getEntity(rLevel.entityIds[i]);
+		if(rEntity.prefabId != UninitializedPoolId || rEntity.cameraId != UninitializedPoolId) continue;
+		nlohmann::ordered_json names = nlohmann::ordered_json::array();
+		if(rEntity.behaviorSetId != UninitializedPoolId)
+		{
+			for(PoolId behaviorId : Globals::Game::entityBehaviors[rEntity.behaviorSetId].behaviorIds) names.push_back(Globals::Game::entityBehaviorTypes.names[behaviorId.id]);
+		}
+		nlohmann::ordered_json shapes = nlohmann::ordered_json::array();
+		for(const Physics::CollisionShape& rShape : entityShapes(rEntity.selfId)) shapes.push_back(writeShape(rShape, &rLevel));
+		nlohmann::ordered_json entry = {{"name", Globals::Game::entities.names[rLevel.entityIds[i].id]}, {"position", vector(glm::vec3(toLocal * glm::vec4(rEntity.position, 1.0f)))}, {"behaviors", names}, {"shapes", shapes}};
+		if(rEntity.rotation != glm::mat4(1.0f))
+		{
+			glm::mat3 matrix(glm::mat3(toLocal) * glm::mat3(rEntity.rotation));
+			entry["rotation"] = nlohmann::ordered_json::array({matrix[0].x, matrix[0].y, matrix[0].z, matrix[1].x, matrix[1].y, matrix[1].z, matrix[2].x, matrix[2].y, matrix[2].z});
+		}
+		if(rEntity.scale != glm::vec3(1.0f)) entry["scale"] = vector(rEntity.scale);
+		entities.push_back(entry);
+	}
+	return entities;
 }
 
 bool saveLevelEdits(PoolId levelId_, const std::string& fileName_)
@@ -1480,6 +1804,13 @@ bool saveLevelEdits(PoolId levelId_, const std::string& fileName_)
 	file.erase("cameras");
 	nlohmann::ordered_json cameras = buildLevelCameras(rLevel);
 	if(!cameras.empty()) file["cameras"] = cameras;
+	file.erase("entities");
+	nlohmann::ordered_json plainEntities = buildLevelEntities(rLevel);
+	if(!plainEntities.empty()) file["entities"] = plainEntities;
+	file.erase("removed");
+	std::vector<uint32_t> removed = rLevel.removed;
+	std::sort(removed.begin(), removed.end());
+	if(!removed.empty()) file["removed"] = removed;
 
 	/*
 	Saving under another name copies the level's whole folder first (its Models, Textures, Collision and Prefabs go with it), then writes the file under the new name. The copy of the old file is removed. A glTF level's chunk files are named after the level, so
@@ -1606,6 +1937,13 @@ void saveSourceLevel(PoolId levelId_)
 	file.erase("cameras");
 	nlohmann::ordered_json cameras = buildLevelCameras(rLevel);
 	if(!cameras.empty()) file["cameras"] = cameras;
+	file.erase("entities");
+	nlohmann::ordered_json plainEntities = buildLevelEntities(rLevel);
+	if(!plainEntities.empty()) file["entities"] = plainEntities;
+	file.erase("removed");
+	std::vector<uint32_t> removed = rLevel.removed;
+	std::sort(removed.begin(), removed.end());
+	if(!removed.empty()) file["removed"] = removed;
 	std::string text = file.dump(2);
 
 	/* The prefabs' edits go to the level's SourceGamePrefabs folder, one file per prefab (removed when the prefab has none). */

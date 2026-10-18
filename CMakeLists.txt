@@ -103,7 +103,7 @@ add_executable(SonicSunset
 	src/Scripting/Scripting.cpp
 	src/Scripting/ScriptAPI.cpp
 	src/Objects/Level.cpp
-	src/Objects/Map.cpp
+	src/Objects/HubWorld.cpp
 	src/Objects/Prefab.cpp
 	src/Objects/SpatialIndex.cpp
 	src/Loading/ResourceLoader.cpp
@@ -223,14 +223,14 @@ add_custom_target(CopyLevels ALL
 )
 add_dependencies(CopyLevels SonicSunset)
 
-# The map (Map.json: where each level sits in the one space, read by Map::read) is copied to Assets/Map.json.
-add_custom_target(CopyMap ALL
+# The HubWorld (HubWorld.json: where each level sits in the one space, read by HubWorld::read) is copied to Assets/HubWorld.json.
+add_custom_target(CopyHubWorld ALL
 	COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:SonicSunset>/Assets
 	COMMAND ${CMAKE_COMMAND} -E copy_if_different
-		${CMAKE_CURRENT_SOURCE_DIR}/Map.json
-		$<TARGET_FILE_DIR:SonicSunset>/Assets/Map.json
+		${CMAKE_CURRENT_SOURCE_DIR}/HubWorld.json
+		$<TARGET_FILE_DIR:SonicSunset>/Assets/HubWorld.json
 )
-add_dependencies(CopyMap SonicSunset)
+add_dependencies(CopyHubWorld SonicSunset)
 
 # The asset catalog (Catalog/, made by tools/genAssetCatalog.py, read by the editor's Assets tab) is copied to Assets/Catalog the same way.
 add_custom_target(CopyCatalog ALL

@@ -51,7 +51,6 @@ void DebugUI::draw(Editor& rEditor_)
 		written until Save). The level's name is the file name Save writes to.
 		*/
 		bool openSaveAs = false;
-		bool openLoad = false;
 		bool openNew = false;
 		bool openSwapModel = false;
 		bool openAddCollision = false;
@@ -70,17 +69,7 @@ void DebugUI::draw(Editor& rEditor_)
 					std::snprintf(this->saveAsName, sizeof(this->saveAsName), "%s", levelName.c_str());
 					openSaveAs = true;
 				}
-				if(ImGui::MenuItem("Load level..."))
-				{
-					this->levelNames.clear();
-					std::error_code error;
-					for(const std::filesystem::directory_entry& rFile : std::filesystem::directory_iterator("Assets/Levels", error))
-					{
-						if(rFile.is_directory() && std::filesystem::exists(rFile.path() / (rFile.path().filename().string() + ".json"))) this->levelNames.push_back(rFile.path().filename().string());
-					}
-					std::sort(this->levelNames.begin(), this->levelNames.end());
-					openLoad = true;
-				}
+				if(ImGui::MenuItem("Load HubWorld")) rEditor_.loadHubWorld();
 				if(ImGui::MenuItem("New level...")) openNew = true;
 
 				/* glTF levels only: Swap level model takes a .gltf/.glb path; Swap collision's side menu has Add collision file (a path) and the level's collision files (the ones in use ticked); picking a file asks for the glTF that replaces it. */
@@ -115,7 +104,6 @@ void DebugUI::draw(Editor& rEditor_)
 			ImGui::EndMainMenuBar();
 		}
 		if(openSaveAs) ImGui::OpenPopup("Save level as");
-		if(openLoad) ImGui::OpenPopup("Load level");
 		if(openNew) ImGui::OpenPopup("New level");
 		if(openSwapModel) ImGui::OpenPopup("Swap level model");
 		if(openAddCollision) ImGui::OpenPopup("Add collision file");
@@ -193,70 +181,22 @@ void DebugUI::draw(Editor& rEditor_)
 		}
 		if(ImGui::BeginPopupModal("New level", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 		{
-			ImGui::TextUnformatted("Writes Levels/<name>/<name>.json (disc paths as in ResourceKeys.h) and loads it; lists are comma separated.");
+			ImGui::TextUnformatted("Writes Levels/<name>/<name>.json for a glTF level and loads it; the collision files are comma separated.");
 			ImGui::InputText("Name", this->newName, sizeof(this->newName));
-			if(ImGui::Combo("Engine", &this->newEngine, "sadx\0sth2005\0gltf\0"))
-			{
-				std::snprintf(this->newShader, sizeof(this->newShader), "%s", this->newEngine == 1 ? "STH2005" : this->newEngine == 2 ? "GLTF" : "SA");
-			}
-			ImGui::InputText("Shader", this->newShader, sizeof(this->newShader));
-			if(this->newEngine == 0)
-			{
-				ImGui::InputText("Land table module (.rel)", this->newLandTableRel, sizeof(this->newLandTableRel));
-				ImGui::InputText("Land table offset", this->newLandTableOffset, sizeof(this->newLandTableOffset));
-				ImGui::InputText("Textures (.gvm)", this->newTextures, sizeof(this->newTextures));
-			}
-			else if(this->newEngine == 2)
-			{
-				ImGui::InputText("Model (.gltf/.glb)", this->newModel, sizeof(this->newModel));
-				ImGui::InputText("Collision files (.gltf/.glb)", this->newCollisions, sizeof(this->newCollisions));
-			}
-			else
-			{
-				ImGui::InputText("Sections (.one)", this->newSections, sizeof(this->newSections));
-				ImGui::InputText("Texture archive (.one)", this->newTextures, sizeof(this->newTextures));
-				ImGui::InputText("Texture .TXD entry", this->newTxd, sizeof(this->newTxd));
-			}
-			if(this->newEngine != 2)
-			{
-				ImGui::InputText("Placement files", this->newPlacementFiles, sizeof(this->newPlacementFiles));
-				ImGui::InputText("Entity table", this->newEntityTable, sizeof(this->newEntityTable));
-				ImGui::InputText("Type names", this->newTypeNames, sizeof(this->newTypeNames));
-			}
+			ImGui::InputText("Model (.gltf/.glb)", this->newModel, sizeof(this->newModel));
+			ImGui::InputText("Collision files (.gltf/.glb)", this->newCollisions, sizeof(this->newCollisions));
 			if(ImGui::Button("Create"))
 			{
 				Loading::NewLevelFile level;
 				level.name = this->newName;
-				level.engine = this->newEngine == 0 ? "sadx" : this->newEngine == 1 ? "sth2005" : "gltf";
-				level.shader = this->newShader;
-				level.landTableRel = this->newLandTableRel;
-				level.landTableOffset = this->newLandTableOffset;
-				level.textures = this->newTextures;
-				level.txd = this->newTxd;
-				level.sections = this->newSections;
-				level.placementFiles = this->newPlacementFiles;
-				level.entityTable = this->newEntityTable;
-				level.typeNames = this->newTypeNames;
+				level.engine = "gltf";
+				level.shader = "GLTF";
 				level.model = this->newModel;
 				level.collisions = this->newCollisions;
 				rEditor_.newLevel(level);
 				ImGui::CloseCurrentPopup();
 			}
 			ImGui::SameLine();
-			if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
-			ImGui::EndPopup();
-		}
-		if(ImGui::BeginPopupModal("Load level", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-		{
-			ImGui::TextUnformatted("Replaces the level; unsaved edits are lost.");
-			for(const std::string& rName : this->levelNames)
-			{
-				if(ImGui::Button(rName.c_str()))
-				{
-					rEditor_.loadLevel(rName);
-					ImGui::CloseCurrentPopup();
-				}
-			}
 			if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
 			ImGui::EndPopup();
 		}
@@ -350,13 +290,13 @@ void DebugUI::draw(Editor& rEditor_)
 	if(rEditor_.active) rEditor_.text.draw(rEditor_.camera);
 	if(rEditor_.active)
 	{
-		if(!rEditor_.mapView) rEditor_.gizmo.draw(rEditor_.camera, rEditor_.entityList.selection());
+		if(!rEditor_.hubWorldView) rEditor_.gizmo.draw(rEditor_.camera, rEditor_.entityList.selection());
 		else
 		{
 			std::vector<glm::vec3> positions;
-			for(const std::string& rName : rEditor_.mapSelection())
+			for(const std::string& rName : rEditor_.hubWorldSelection())
 			{
-				MapLevel place;
+				HubWorldLevel place;
 				if(rEditor_.levelPlace(rName, place)) positions.push_back(place.position);
 			}
 			rEditor_.gizmo.drawLevels(rEditor_.camera, positions);

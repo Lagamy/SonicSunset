@@ -105,25 +105,25 @@ void Level::computeBounds()
 	this->boundsMax = high;
 }
 
-glm::mat4 Level::mapMatrix() const
+glm::mat4 Level::hubWorldMatrix() const
 {
-	glm::mat4 matrix = glm::translate(glm::mat4(1.0f), this->mapPosition);
-	matrix = glm::rotate(matrix, glm::radians(this->mapRotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-	matrix = glm::rotate(matrix, glm::radians(this->mapRotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-	matrix = glm::rotate(matrix, glm::radians(this->mapRotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
+	glm::mat4 matrix = glm::translate(glm::mat4(1.0f), this->hubWorldPosition);
+	matrix = glm::rotate(matrix, glm::radians(this->hubWorldRotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
+	matrix = glm::rotate(matrix, glm::radians(this->hubWorldRotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
+	matrix = glm::rotate(matrix, glm::radians(this->hubWorldRotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
 	return matrix;
 }
 
 void Level::placeCollision()
 {
 	if(this->collisionId == UninitializedPoolId) return;
-	glm::mat4 matrix = this->mapMatrix();
+	glm::mat4 matrix = this->hubWorldMatrix();
 	Physics::Collision& rCollision = Globals::Physics::collisions[this->collisionId];
 	rCollision.setRotation(glm::mat3(matrix));
 	rCollision.setPosition(glm::vec3(matrix * glm::vec4(this->position, 1.0f)));
 }
 
-void Level::commitMapCollision()
+void Level::commitHubWorldCollision()
 {
 	if(!this->collisionStale) return;
 	this->collisionStale = false;
@@ -131,12 +131,12 @@ void Level::commitMapCollision()
 	Globals::Physics::collisionSystem.rebuildQuadTree();
 }
 
-void Level::setMapTransform(const glm::vec3& rPosition_, const glm::vec3& rRotationDegrees_, bool collision_)
+void Level::setHubWorldTransform(const glm::vec3& rPosition_, const glm::vec3& rRotationDegrees_, bool collision_)
 {
-	glm::mat4 old = this->mapMatrix();
-	this->mapPosition = rPosition_;
-	this->mapRotation = rRotationDegrees_;
-	glm::mat4 delta = this->mapMatrix() * glm::inverse(old);
+	glm::mat4 old = this->hubWorldMatrix();
+	this->hubWorldPosition = rPosition_;
+	this->hubWorldRotation = rRotationDegrees_;
+	glm::mat4 delta = this->hubWorldMatrix() * glm::inverse(old);
 	glm::mat4 deltaRotation = glm::mat4(glm::mat3(delta));
 	auto movePoint = [&](const glm::vec3& rPoint_) { return glm::vec3(delta * glm::vec4(rPoint_, 1.0f)); };
 
@@ -156,7 +156,7 @@ void Level::setMapTransform(const glm::vec3& rPosition_, const glm::vec3& rRotat
 		if(rBuilt.baseline.hasCamera) rBuilt.baseline.cameraPosition = movePoint(rBuilt.baseline.cameraPosition);
 	}
 	this->collisionStale = true;
-	if(collision_) this->commitMapCollision();
+	if(collision_) this->commitHubWorldCollision();
 #ifdef EDITOR
 	for(Graphics::CollisionView::Marker& rMarker : editor.collisionView.markers)
 	{
@@ -470,7 +470,7 @@ void Level::update(float deltaTime_)
 void Level::draw(const Camera& rCamera_)
 {
 	if(this->instanceId == UninitializedPoolId) return;
-	glm::mat4 base = this->mapMatrix() * glm::translate(glm::mat4(1.0f), this->position);
+	glm::mat4 base = this->hubWorldMatrix() * glm::translate(glm::mat4(1.0f), this->position);
 	switch(this->sourceEngine)
 	{
 	case SA_NINJA:
@@ -640,6 +640,19 @@ void Level::resolveExternalEntities()
 				rValue.entityIndex = -1;
 			}
 		}
+		/* The values of the entity's collision shapes (Physics::CollisionShape::values) refer to entities the same way. */
+		PoolId collisionId = getEntity(id).collisionId;
+		if(collisionId == UninitializedPoolId) continue;
+		for(Physics::CollisionShape& rShape : Globals::Physics::collisions[collisionId].shapes)
+		{
+			for(auto& [fieldName, rValue] : rShape.values)
+			{
+				if(rValue.entityIndex < 0) continue;
+				bool found = static_cast<size_t>(rValue.entityIndex) < this->entityIds.size() && entityExists(this->entityIds[rValue.entityIndex]);
+				rValue.entity = found ? this->entityIds[rValue.entityIndex] : UninitializedPoolId;
+				rValue.entityIndex = -1;
+			}
+		}
 	}
 }
 
@@ -658,8 +671,32 @@ std::vector<PoolId> Level::referencedPrefabs() const
 				if(std::find(found.begin(), found.end(), prefab) == found.end()) found.push_back(prefab);
 			}
 		}
+		PoolId collisionId = getEntity(id).collisionId;
+		if(collisionId == UninitializedPoolId) continue;
+		for(const Physics::CollisionShape& rShape : Globals::Physics::collisions[collisionId].shapes)
+		{
+			for(const auto& [fieldName, rValue] : rShape.values)
+			{
+				PoolId prefab = rValue.prefab;
+				if(prefab.id >= Globals::Game::prefabs.objects.size() || !Globals::Game::prefabs.alive[prefab.id] || Globals::Game::prefabs.generation[prefab.id] != prefab.generation) continue;
+				if(std::find(found.begin(), found.end(), prefab) == found.end()) found.push_back(prefab);
+			}
+		}
 	}
 	return found;
+}
+
+void Level::removeSourceEntity(uint32_t index_)
+{
+	if(index_ >= this->sourceEntityCount || index_ >= this->entityIds.size()) return;
+	if(!this->isRemoved(index_)) this->removed.push_back(index_);
+	if(entityExists(this->entityIds[index_])) Globals::Game::entities.remove(this->entityIds[index_]);
+	Globals::Game::spatialIndex.dirty = true;
+}
+
+bool Level::isRemoved(uint32_t index_) const
+{
+	return std::find(this->removed.begin(), this->removed.end(), index_) != this->removed.end();
 }
 
 void Level::revertSourceEntity(uint32_t index_)
@@ -723,6 +760,7 @@ void Level::destroyEntities()
 	this->built.clear();
 	this->builtCount = 0;
 	this->sourceEntityCount = 0;
+	this->removed.clear();
 	this->sourcePositions.clear();
 	this->sourceRotations.clear();
 	this->sourceScales.clear();

@@ -55,12 +55,12 @@ PoolId addLevel(const char* name_, glm::vec3 position_)
 
 PoolId activeLevelId()
 {
-    /* The level the map names; none loaded under that name (a level made another way) = the lowest alive slot. */
-    if(!Globals::Game::map.active.empty())
+    /* The level the HubWorld names; none loaded under that name (a level made another way) = the lowest alive slot. */
+    if(!Globals::Game::hubWorld.active.empty())
     {
         for(uint32_t i = 0; i < Globals::Game::levels.objects.size(); i++)
         {
-            if(Globals::Game::levels.alive[i] && Globals::Game::levels.names[i] == Globals::Game::map.active) return PoolId(i, Globals::Game::levels.generation[i]);
+            if(Globals::Game::levels.alive[i] && Globals::Game::levels.names[i] == Globals::Game::hubWorld.active) return PoolId(i, Globals::Game::levels.generation[i]);
         }
     }
     for(uint32_t i = 0; i < Globals::Game::levels.objects.size(); i++)
@@ -73,7 +73,7 @@ PoolId activeLevelId()
 bool levelShown(PoolId levelId_)
 {
 #ifdef EDITOR
-    if(!editor.active || editor.mapView || levelId_ == UninitializedPoolId) return true;
+    if(!editor.active || editor.hubWorldView || editor.hubWorldEntities || levelId_ == UninitializedPoolId) return true;
     return levelId_ == activeLevelId();
 #else
     return true;

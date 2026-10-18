@@ -103,9 +103,9 @@ These read the discs in `build/Disks/` and write files. Run them only when the g
 
 `dumpCCL.py` reads Shadow `.CCL` collision files: `[outDir]` dumps them all (a summary only without it), `-x NAME` hex dump, `-p NAME` parsed, `--check` lists the entries that break the known layout.
 
-## glTF attribute round trip (Map.gltf pipeline, step 0)
+## glTF attribute round trip (HubWorld.gltf pipeline, step 0)
 
-Written 2026-10-14, not run. Both stdlib only, no disc data. See the "Map.gltf authoring pipeline" item in `docs/TODO.md`.
+Written 2026-10-14, not run. Both stdlib only, no disc data. See the "HubWorld.gltf authoring pipeline" item in `docs/TODO.md`.
 
 - `gltfAttrWrite.py [--out DIR/probe.gltf]` writes a probe glTF (two nodes, a few triangles, two vertices sharing a position) with the per-vertex fields in two encodings: custom attributes `_SRC` (uint), `_SRCFLAG` (uint), `_SRCIDX` (uint), `_ORIG` (vec3), and the same data in `TEXCOORD_1..3` as float32. Also writes the `.bin` and `<stem>.expected.json`. The colleague imports it in their modelling tool and re-exports it (run 1 no edits; run 2 a moved vertex, a deleted and a new triangle; once more with any custom-attribute export option on).
 - `gltfAttrCheck.py FILE [--expected X.expected.json] [--tool "name, options"] [--ai]` reads the re-export (`.gltf` or `.glb`) and reports per channel whether it survived and under which name and type, whether the moved vertex kept its original position, POSITION axis conversion, V flip of the UV sets, vertex welding / splitting and new geometry. Verdict: `PRIMARY=custom` (all four custom fields survive), `FALLBACK=texcoord` (custom lost, TEXCOORD sets exact), or `NONE` (stop and tell the user). Values above 2^24-1 cannot be exact in float32 and are left out of the fallback verdict. `--ai` is the compact form.

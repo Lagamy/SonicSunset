@@ -1,5 +1,5 @@
 """
-Step 0 of the Map.gltf authoring pipeline (docs/TODO.md): writes a tiny probe glTF whose vertices carry the per-vertex fields
+Step 0 of the HubWorld.gltf authoring pipeline (docs/TODO.md): writes a tiny probe glTF whose vertices carry the per-vertex fields
 the pipeline needs, so that a round trip through the modelling tool shows which of them survive. Read the result with tools/gltfAttrCheck.py.
 
     python3 tools/gltfAttrWrite.py [--out DIR/probe.gltf]        default: probe.gltf in the current directory
