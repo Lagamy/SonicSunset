@@ -4,6 +4,7 @@
 #include <cmath>
 #include <map>
 #include <string>
+#include <vector>
 #include <glm/glm.hpp>
 #include "PoolId.h"
 #include "Constants.h"
@@ -19,6 +20,7 @@ Nothing is interpreted here beyond the layout; what the values mean is only what
   Higher values (8 to 10) appear in tables and are unknown. Values from 11 on are not SADX's: readCCL (Shadow's .CCL) uses 6 for a capsule and 11 for a cylinder, a = radius and b = half length, along the shape's z axis (hypothesis); 6 is also an SADX form of unknown meaning.
 - kind, push, damage, attr: raw flags (what collides with what, push, damage, attributes); meanings unknown.
 - behavior: the shape's behaviour (Globals::Game::behaviors), from attr by the remap of its source (BABehaviors::resolve); UninitializedPoolId until a loader sets it (a moving entity's shape then counts as a Body).
+- tags: the shape's own tags besides its behaviour's (Globals::Game::baTags), from the remap of its source and edited in the BoundArea tab; the other side of a contact sees both (BABehavior.h).
 - center is relative to the object; angle is the shape's rotation in BAMS (65536 = a full turn), the order of the axes unknown.
 - values: the shape's own external values, by field name, for the fields its behaviour declares (BABehavior::fields, BABehaviors::fieldsOf): set in the BoundArea tab, handed to the behaviour's Lua functions as their third argument. Empty for every shape the
   games' tables make. Only a value that was set is stored; the others read as the declared default. valuesKept holds, as JSON text, the values a level file had that no declared field took (the behaviour has no such field, or the value did not fit), so a save writes them back.
@@ -38,6 +40,7 @@ struct CollisionShape
 	float d;
 	glm::ivec3 angle;
 	PoolId behavior;
+	std::vector<PoolId> tags;
 	std::map<std::string, ExternalValue> values;
 	std::map<std::string, std::string> valuesKept;
 

@@ -1,11 +1,9 @@
 #pragma once
 #include "PoolId.h"
+#include "Paths.h"
 #include <vector>
 
-namespace Ninja
-{
-struct SAPlacement;
-}
+#include "GamePlacement.h"
 
 /*
 The scripting layer: gameplay written in Lua 5.4 (third-party/lua, compiled as C++ so a Lua error is a C++ exception and nothing is longjmp'ed over a C++ frame) over the engine, which stays C++: one physics and
@@ -27,8 +25,8 @@ void destroy();
 bool ready();
 
 /* The two script roots (with the trailing slash). */
-constexpr const char* ScriptsRoot = "Assets/Scripts/";
-constexpr const char* ExternalScriptsRoot = "Assets/External/Scripts/";
+constexpr const char* ScriptsRoot = Paths::Scripts;
+constexpr const char* ExternalScriptsRoot = Paths::ExternalScripts;
 
 /* Runs a script below a root (path_ relative to it; Assets/Scripts by default); an error is printed on stderr and gives false. */
 bool loadFile(const char* path_, const char* root_ = ScriptsRoot);
@@ -45,7 +43,7 @@ A prefab's behaviour (sf.prefabBehavior(prefabName, fn), prefabName as Globals::
 in BAMS, position = {x, y, z}, scale = {x, y, z}}, nil if the object has none; a prefab with none is skipped. hasPrefabBehavior says whether one is registered.
 The other hook into the scripts' own functions is the global `attachPlayer(entity)`; a script that does not define it is skipped.
 */
-void setupPrefab(PoolId entityId_, const char* prefabName_, const Ninja::SAPlacement* pPlacement_);
+void setupPrefab(PoolId entityId_, const char* prefabName_, const PrefabPlacement* pPlacement_);
 bool hasPrefabBehavior(const char* prefabName_);
 void attachPlayer(PoolId entityId_);
 

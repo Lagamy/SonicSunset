@@ -26,6 +26,8 @@ struct PrefabThumbnails
 {
 	static constexpr uint32_t Size = 128;
 	static constexpr int PerFrame = 4;
+	/* The cube colour index (see cubeOf) of a prefab with neither collision nor behaviour, and of the pictures of disc models that can't be drawn. */
+	static constexpr int CubeGrey = 3;
 
 	/* Makes the target, the camera and the cube meshes. After the renderer (Renderer::init adds the Default shader) and the window. */
 	void init();

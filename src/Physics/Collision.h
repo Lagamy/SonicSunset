@@ -28,6 +28,7 @@ struct Collision
 	PoolId entityId;
 	std::unordered_map<uint32_t, PoolId> behaviorByValue;
 	PoolId fallbackBehavior;
+	std::unordered_map<uint32_t, std::vector<PoolId>> tagsByValue;
 	glm::vec3 position = glm::vec3(0.0f);
 	/* The vertices as loaded, kept only while setRotation has turned the mesh (empty = mesh.vertices are the loaded ones). */
 	std::vector<glm::vec3> baseVertices;
@@ -42,6 +43,13 @@ struct Collision
 	{
 		auto found = this->behaviorByValue.find(this->mesh.triangleValue(triangle_));
 		return found != this->behaviorByValue.end() ? found->second : this->fallbackBehavior;
+	}
+
+	/* The tags of a triangle's raw value besides its behaviour's (tagsByValue, filled by BABehaviors::resolve from the remap); nullptr if it has none. */
+	const std::vector<PoolId>* extraTagsOf(uint32_t triangle_) const
+	{
+		auto found = this->tagsByValue.find(this->mesh.triangleValue(triangle_));
+		return found != this->tagsByValue.end() && !found->second.empty() ? &found->second : nullptr;
 	}
 
 	void computeBounds();

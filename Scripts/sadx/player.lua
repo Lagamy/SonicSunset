@@ -109,13 +109,14 @@ local PROBE_REACH_SLOW = 0.1                           -- decompile (FUN_804d83c
 local PROBE_REACH_FAST = 1.5                           -- the same at RUN_MAX_SPEED or more; linear between
 
 -- ==== Constants: animation ====
+local BLOCKED_FACING_COS = 0.5                            -- placeholder: the wall's normal against his heading (cosine) from which he counts as blocked by it and stands instead of walking in place
 local AIR_ANIMATION_TICKS = 8                           -- placeholder: ticks without ground contact before the air motions play (the engine's ground contact flickers on uneven terrain)
 local CONTACT_WINDOW = 8                                -- placeholder: see LAND_CONTACTS
 local LAND_CONTACTS = 4                                 -- placeholder: ticks with ground contact among the last CONTACT_WINDOW before the air motions give way to the ground ones
 -- Standing poses (table entries 0x1 Land after a fall, 0x2 Alternate Stand after a jump, 0x4 and 0x5 the idle waiting, 0x1D the roll's end; FUN_805a3e58, FUN_805a9c28, FUN_804cf4f4). A motion that plays once ends at its
 -- last frame (frame >= count - 1, at the table's rate) after its blend; its value is the game frames from the change to the end, derived: blend frames (1 / step) + (frames - 1) / rate. Land 4 + 19 / 0.25, Wait A the same,
 -- Wait B 4 + 38 / 0.25, Roll End 16 + 15 / 1. The entry after each is the table's next id (Land to Alternate Stand, Wait A to Wait B, Roll End to Land).
-local POSE_END = {rollEnd = 31, landFall = 80, waitA = 80, waitB = 156, waitBack = 81}
+local POSE_END = {rollEnd = 12, landFall = 80, waitA = 80, waitB = 156, waitBack = 81}
 local POSE_NEXT = {rollEnd = "landFall", landFall = "standAlt", waitA = "waitB", waitB = "waitBack"}
 local POSE_RATE = {standAlt = 0.25, landFall = 0.25, waitA = 0.25, waitB = 0.25, waitBack = 0.25, rollEnd = 1.0} -- external (table +0xC); waitBack (id 6) plays backwards: its rate is sent negative
 local IDLE_WAIT_FRAMES = 0x708                          -- external (FUN_805a9c28): the state 1 steps (work+0xE) after which the idle waiting (Wait A) starts, 1800 = 30 s at 60 a second
@@ -634,7 +635,7 @@ end
 
 -- The motion the tick plays and its playback rate (nil: the motion's own), from the state the tick's physics left. forward and excess = groundStep's (units per frame), turnAway = the brake's skid, charging = the spin dash's charge.
 -- Keeps the ground contact window (state.contacts), the landing, the standing poses and the idle count in state. Returns the motion's name and the rate.
-local function chooseMotion(state, grounded, vy, hasWish, charging, forward, excess, turnAway, frames)
+local function chooseMotion(state, grounded, vy, hasWish, charging, forward, excess, turnAway, blocked, frames)
 	-- Motion. External (FUN_805a99f0, FUN_805aa66c; "Animation" in docs/SADX_SONIC_REFERENCE.md): on the ground by forward speed plus the excess, Walk to WALK_SPEED, Speedwalk to SPEEDWALK_SPEED, Jog to JOG_SPEED, Run to RUN_MAX_SPEED,
 	-- Sprint above; standing still is Stand; Brake while the brake state 0xD's skid runs (state.brake), Turn Around after its stop (state.turnFrames); Landing for LANDING_TICKS after a hard landing standing still;
 	-- the curled Jump for the jump, the charge and the roll. Placeholder or hypothesis (see the top): Damage while state.damaged, Spring Fall while rising after a spring, else Fall.
@@ -734,10 +735,23 @@ local function chooseMotion(state, grounded, vy, hasWish, charging, forward, exc
 	else
 		if state.springed and vy <= 0 then state.springed = false end
 		if state.springed then state.jumped = false end
-		motion = state.springed and "springFall" or state.jumped and "jump" or "fall"
-		if motion == "jump" then
+		-- The ball flag (set by the jump, the charge and the roll; cleared by the uncurl, the homing end and the landing) keeps him curled in the air: a charge or roll that left the ground (a ledge, a contact gap longer
+		-- than the air motions' delay) goes on with its curled motion, not Fall. Hypothesis: the game's state after leaving the ground in a roll is not decoded; this only keeps the ball.
+		if state.springed then
+			motion = "springFall"
+		elseif charging then
+			motion = "jump"
+			state.work0 = state.charge
+			rate = JUMP_RATE * state.work0
+		elseif state.rolling then
+			motion = "roll"
+			rate = ROLL_RATE * forward
+		elseif state.jumped or state.ball then
+			motion = "jump"
 			state.work0 = JUMP_WORK0
 			rate = JUMP_RATE * state.work0
+		else
+			motion = "fall"
 		end
 		state.landing, state.pose, state.idleFrames = 0, nil, 0
 	end
@@ -1107,7 +1121,15 @@ local function playerStep(entity, replay)
 	end
 
 	-- ==== animation ====
-	local motion, rate = chooseMotion(state, grounded, vy, hasWish, charging, forward, excess, turnAway, frames)
+	-- Blocked by a wall: observed (user): against a wall he stands, he does not walk in place. The engine cuts the velocity into the wall each tick, so the forward speed stays at one tick of acceleration; the wall
+	-- counts when it was touched, the speed is under WALK_SPEED and the wall's normal faces his heading (placeholder: BLOCKED_FACING_COS). Only the motion pick uses it; the physics and the idle count are untouched.
+	local blocked = false
+	if onGround and hasWish and forward < WALK_SPEED and sf.touchingWall(entity) then
+		local wx, _, wz = sf.wallNormal(entity)
+		local fx, _, fz = groundAxes(heading, 0, 1, 0)
+		blocked = fx * wx + fz * wz < -BLOCKED_FACING_COS
+	end
+	local motion, rate = chooseMotion(state, grounded, vy, hasWish, charging, forward, excess, turnAway, blocked, frames)
 
 	-- ==== model ====
 	applyModel(entity, state, motion, rate, onGround)

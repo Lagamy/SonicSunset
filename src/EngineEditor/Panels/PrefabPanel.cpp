@@ -1,4 +1,5 @@
 #include "PrefabPanel.h"
+#include "Paths.h"
 #include "Globals.h"
 #include "API.h"
 #include "Prefab.h"
@@ -82,7 +83,7 @@ void PrefabPanel::rebuildTiles()
 		/* The Level folder lists only the active level's prefabs: every loaded level has its own. */
 		if(rPrefab.inLevel && rPrefab.level != this->listedLevel) continue;
 		if(rPrefab.kind == PrefabKind::External) this->externalTiles[rPrefab.inLevel ? 1 : 0].push_back(id);
-		else this->tiles[rPrefab.game == SA_NINJA ? 0 : 1][static_cast<int>(rPrefab.group)].push_back(id);
+		else this->tiles[gameSourceIndex(rPrefab.game)][static_cast<int>(rPrefab.group)].push_back(id);
 	}
 	auto byName = [&](PoolId a_, PoolId b_) { return rPrefabs.objects[a_.id].name < rPrefabs.objects[b_.id].name; };
 	for(auto& rGame : this->tiles)
@@ -102,7 +103,7 @@ void PrefabPanel::filterTiles()
 	std::string needle = lowerCase(this->shownFor);
 	const auto& rPrefabs = Globals::Game::prefabs;
 	auto matches = [&](PoolId id_) { return needle.empty() || lowerCase(rPrefabs.objects[id_.id].name).find(needle) != std::string::npos; };
-	for(int game = 0; game < 2; game++)
+	for(int game = 0; game < GameSourceCount; game++)
 	{
 		for(int group = 0; group < 5; group++)
 		{
@@ -113,10 +114,13 @@ void PrefabPanel::filterTiles()
 				if(matches(id)) rShown.push_back(id);
 			}
 		}
-		this->externalShown[game].clear();
-		for(PoolId id : this->externalTiles[game])
+	}
+	for(int scope = 0; scope < 2; scope++)
+	{
+		this->externalShown[scope].clear();
+		for(PoolId id : this->externalTiles[scope])
 		{
-			if(matches(id)) this->externalShown[game].push_back(id);
+			if(matches(id)) this->externalShown[scope].push_back(id);
 		}
 	}
 }
@@ -189,7 +193,7 @@ void PrefabPanel::spawn(PoolId prefabId_, PoolId& rSelectedEntity_, const Editor
 	params.position = rCamera_.position + rCamera_.front * SpawnDistance;
 	params.what = "(editor)";
 	params.levelId = editor.hubWorldEntities ? UninitializedPoolId : editor.currentLevel();
-	PoolId id = spawnPrefab(prefabId_, getShaderId(rPrefab.game == SA_NINJA ? "SA" : "STH2005"), params);
+	PoolId id = spawnPrefab(prefabId_, getShaderId(gameShaderName(rPrefab.game)), params);
 	if(id == UninitializedPoolId)
 	{
 		this->message = std::format("Could not spawn {}, see the log.", rPrefab.name);
@@ -400,10 +404,9 @@ void PrefabPanel::drawBrowser()
 /* The search: the matching prefabs in sections named by where they live ("Game > Group", "Global > folder"). */
 void PrefabPanel::drawSearchResults()
 {
-	const SourceEngineEnum games[2] = {SA_NINJA, STH2005_ONE};
 	const auto& rPrefabs = Globals::Game::prefabs;
 	bool any = false;
-	for(int game = 0; game < 2; game++)
+	for(int game = 0; game < GameSourceCount; game++)
 	{
 		ImGui::PushID(game);
 		for(int group = 0; group < 5; group++)
@@ -412,7 +415,7 @@ void PrefabPanel::drawSearchResults()
 			if(rList.empty()) continue;
 			any = true;
 			ImGui::PushID(group);
-			ImGui::SeparatorText(std::format("{} > {} ({})", prefabGameFolder(games[game]), prefabGroupFolder(static_cast<PrefabGroup>(group)), rList.size()).c_str());
+			ImGui::SeparatorText(std::format("{} > {} ({})", prefabGameFolder(GameSources[game]), prefabGroupFolder(static_cast<PrefabGroup>(group)), rList.size()).c_str());
 			this->drawGrid(rList);
 			ImGui::PopID();
 		}
@@ -453,7 +456,7 @@ void PrefabPanel::drawLevels()
 	std::string openName = openId != UninitializedPoolId ? Globals::Game::levels.names[openId.id] : std::string();
 	std::vector<std::string> names;
 	std::error_code error;
-	for(const std::filesystem::directory_entry& rFile : std::filesystem::directory_iterator("Assets/Levels", error))
+	for(const std::filesystem::directory_entry& rFile : std::filesystem::directory_iterator(Paths::LevelsDir, error))
 	{
 		std::string name = rFile.path().filename().string();
 		if(rFile.is_directory() && std::filesystem::exists(rFile.path() / (name + ".json"))) names.push_back(name);

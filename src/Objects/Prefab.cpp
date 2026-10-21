@@ -16,16 +16,6 @@ uint32_t prefabRevision()
 	return prefabRevisionCounter;
 }
 
-const char* prefabGameName(SourceEngineEnum game_)
-{
-	return game_ == SA_NINJA ? "SADX" : "STH2005";
-}
-
-const char* prefabGameFolder(SourceEngineEnum game_)
-{
-	return game_ == SA_NINJA ? "Sonic Adventure Director's Cut" : "Shadow The Hedgehog 2005";
-}
-
 const char* prefabGroupFolder(PrefabGroup group_)
 {
 	switch(group_)
@@ -418,7 +408,7 @@ void applyPrefabMesh(PoolId prefabId_, PoolId entityId_)
 }
 
 /* Adds the prefab under "<game>/<name>"; a name that is already registered keeps the first. hasBehaviour also counts a behaviour a script registered for that name. */
-static void addPrefab(Prefab prefab_)
+void addPrefab(Prefab prefab_)
 {
 	std::string poolName = std::format("{}/{}", prefabGameName(prefab_.game), prefab_.name);
 	if(Globals::Game::prefabs.nameToId.contains(poolName)) return;
@@ -455,24 +445,4 @@ void removeLevelPrefabs(const std::string& levelName_)
 		if(rPrefabs.alive[i] && rPrefabs.objects[i].inLevel && rPrefabs.objects[i].level == levelName_) rPrefabs.remove(PoolId(i, rPrefabs.generation[i]));
 	}
 	prefabRevisionCounter++;
-}
-
-void registerPrefabs()
-{
-	/* The players: no entity key, they are made from the constants of ResourceKeys.h, and their body shape is their Changed file's (spawnPrefab). A script attaches their behaviours (attachPlayer). */
-	addPrefab(Prefab{"Sonic", SA_NINJA, PrefabGroup::Characters, PrefabKind::SonicPlayer, nullptr, nullptr, true, true, true});
-	addPrefab(Prefab{"Shadow", STH2005_ONE, PrefabGroup::Characters, PrefabKind::ShadowPlayer, nullptr, nullptr, true, true, true});
-
-	/* The groups of the key prefabs are given afterwards, from Groups.json (Loading::loadPrefabData). */
-	Loading::forEachSAEntityKey([](const SAEntityKey& rKey_)
-	{
-		bool hasModel = rKey_.model.rel != nullptr;
-		for(const SAModelKey& rVariant : rKey_.variantModels) hasModel = hasModel || rVariant.rel != nullptr;
-		bool hasCollision = !rKey_.collisions.empty() || !rKey_.variantCollisions.empty();
-		addPrefab(Prefab{rKey_.name, SA_NINJA, PrefabGroup::StaticObjects, PrefabKind::SAObject, &rKey_, nullptr, hasModel, hasCollision, false});
-	});
-	Loading::forEachONEEntityKey([](const STH2005::EntityKey& rKey_)
-	{
-		addPrefab(Prefab{rKey_.name, STH2005_ONE, PrefabGroup::StaticObjects, PrefabKind::ONEObject, nullptr, &rKey_, !rKey_.models.empty(), !rKey_.collisions.empty(), false});
-	});
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include "Paths.h"
 #include <vector>
 
 /*
@@ -12,5 +13,5 @@ struct GLTFLevelKey
 	std::string levelName;
 	std::vector<std::string> collisions;
 
-	std::string folder() const { return "Assets/Levels/" + this->levelName; }
+	std::string folder() const { return Paths::Levels + this->levelName; }
 };

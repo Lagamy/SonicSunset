@@ -2,7 +2,7 @@
 #include "GPU_Globals.h"
 #include "RenderStats.h"
 #include "GPU_API.h"
-#include "ResourceLoader.h"
+#include "GameLoaders.h"
 #include <algorithm>
 #include <cmath>
 #include <format>

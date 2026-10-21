@@ -1,10 +1,12 @@
 #pragma once
 #include <cstdint>
 #include "PoolId.h"
+#include "lua.h"
+#include "lauxlib.h"
+#include <exception>
+#include <glm/glm.hpp>
 
-struct lua_State;
-
-/* What the files of the scripting layer share (Scripting.cpp, ScriptAPI.cpp); not for the rest of the engine. */
+/* What the files of the scripting layer share (Scripting.cpp, ScriptAPI.cpp and the game's Game/GameScriptAPI.cpp); not for the rest of the engine. */
 namespace Scripting
 {
 lua_State* state();
@@ -38,4 +40,29 @@ void pushEntityState(lua_State* pLua_, PoolId entityId_);
 
 /* Registers the global table `sf`. */
 void registerAPI(lua_State* pState_);
+
+/* The helpers of the functions of `sf` (ScriptAPI.cpp). checkEntity: the live entity the handle at the argument names, a Lua error otherwise. */
+PoolId checkEntity(lua_State* pLua_, int arg_);
+int pushVector(lua_State* pLua_, const glm::vec3& rVector_);
+glm::vec3 checkVector(lua_State* pLua_, int firstArg_);
+PoolId shaderByName(const char* name_);
+/* Remembers an entity a script made (Scripting::spawnedEntities) and pushes its handle; returns the number of values pushed (1). */
+int pushSpawned(lua_State* pLua_, PoolId id_);
+
+/* A C++ exception of the engine (a std::runtime_error from a pool or a loader) becomes a Lua error with its message instead of a crash. */
+template<int (*Function)(lua_State*)>
+int guarded(lua_State* pLua_)
+{
+	try
+	{
+		return Function(pLua_);
+	}
+	catch(const std::exception& rError)
+	{
+		return luaL_error(pLua_, "%s", rError.what());
+	}
+}
+
+/* Defined by the game (Game/GameScriptAPI.cpp): adds its own functions to the table `sf` on the top of the stack. */
+void registerGameAPI(lua_State* pLua_);
 }

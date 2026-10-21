@@ -47,7 +47,7 @@ private:
 	PrefabThumbnails thumbnails;
 
 	/* The prefabs of each game (0 = SADX, 1 = Shadow) and group, and of each External scope (0 = Global, 1 = Level), by name, and the prefabRevision they were made at. */
-	std::array<std::array<std::vector<PoolId>, 5>, 2> tiles;
+	std::array<std::array<std::vector<PoolId>, 5>, GameSourceCount> tiles;
 	std::array<std::vector<PoolId>, 2> externalTiles;
 	uint32_t listedRevision = 0;
 	/* The level whose Level folder the tiles show (Loading::levelPrefabScope when they were made). */
@@ -62,7 +62,7 @@ private:
 	char search[128] = "";
 
 	/* What the Prefabs tab shows when searching: tiles filtered by the search text it was made for; made again when the text or tiles change. */
-	std::array<std::array<std::vector<PoolId>, 5>, 2> shown;
+	std::array<std::array<std::vector<PoolId>, 5>, GameSourceCount> shown;
 	std::array<std::vector<PoolId>, 2> externalShown;
 	std::string shownFor;
 	bool shownStale = true;

@@ -1,4 +1,5 @@
 #include "BABehaviors.h"
+#include "Paths.h"
 #include "Globals.h"
 #include <algorithm>
 #include <filesystem>
@@ -100,25 +101,40 @@ void BABehaviors::resolve(Physics::Collision& rCollision_, const BARemap& rRemap
 		return fallback;
 	};
 
+	auto tagsOf = [&](uint32_t raw_) -> std::vector<PoolId>
+	{
+		auto found = rRemap_.tags.find(raw_);
+		return found != rRemap_.tags.end() ? found->second : std::vector<PoolId>{};
+	};
+
 	rCollision_.fallbackBehavior = fallback;
 	const Physics::CollisionMesh& rMesh = rCollision_.mesh;
 	if(!rMesh.triangleAttributes.empty())
 	{
 		for(uint32_t value : rMesh.triangleAttributes)
 		{
-			if(!rCollision_.behaviorByValue.contains(value)) rCollision_.behaviorByValue.emplace(value, behaviorOf(value));
+			if(!rCollision_.behaviorByValue.contains(value))
+			{
+				rCollision_.behaviorByValue.emplace(value, behaviorOf(value));
+				rCollision_.tagsByValue[value] = tagsOf(value);
+			}
 		}
 	}
 	else
 	{
 		for(const Physics::CollisionPiece& rPiece : rMesh.pieces)
 		{
-			if(!rCollision_.behaviorByValue.contains(rPiece.flags)) rCollision_.behaviorByValue.emplace(rPiece.flags, behaviorOf(rPiece.flags));
+			if(!rCollision_.behaviorByValue.contains(rPiece.flags))
+			{
+				rCollision_.behaviorByValue.emplace(rPiece.flags, behaviorOf(rPiece.flags));
+				rCollision_.tagsByValue[rPiece.flags] = tagsOf(rPiece.flags);
+			}
 		}
 	}
 	for(Physics::CollisionShape& rShape : rCollision_.shapes)
 	{
 		rShape.behavior = behaviorOf(rShape.attr);
+		rShape.tags = tagsOf(rShape.attr);
 	}
 }
 
@@ -138,6 +154,16 @@ BARemap readRemap(const BABehaviors& rBehaviors_, const nlohmann::json& rFile_, 
 		return id;
 	};
 
+	auto tagNamed = [&](const std::string& rName_) -> PoolId
+	{
+		PoolId id = rBehaviors_.findTag(rName_.c_str());
+		if(id == UninitializedPoolId)
+		{
+			throw std::runtime_error(std::format("BABehaviors: remap {} names the tag {}, which does not exist.", name_, rName_));
+		}
+		return id;
+	};
+
 	BARemap remap;
 	remap.fallback = behaviorNamed(rRemap.at("fallback").get<std::string>());
 	for(const auto& [rRaw, rBehavior] : rRemap.at("values").items())
@@ -149,7 +175,18 @@ BARemap readRemap(const BABehaviors& rBehaviors_, const nlohmann::json& rFile_, 
 		{
 			if(rEntry.first == raw) throw std::runtime_error(std::format("BABehaviors: remap {} lists the raw value {} twice.", name_, rRaw));
 		}
-		remap.entries.emplace_back(raw, behaviorNamed(rBehavior.get<std::string>()));
+		/* A value is the behaviour's name, or {"behavior": name, "tags": [tag names]} when it has tags of its own. */
+		if(rBehavior.is_object())
+		{
+			remap.entries.emplace_back(raw, behaviorNamed(rBehavior.at("behavior").get<std::string>()));
+			std::vector<PoolId> tags;
+			if(rBehavior.contains("tags"))
+			{
+				for(const nlohmann::json& rTag : rBehavior.at("tags")) tags.push_back(tagNamed(rTag.get<std::string>()));
+			}
+			if(!tags.empty()) remap.tags[raw] = tags;
+		}
+		else remap.entries.emplace_back(raw, behaviorNamed(rBehavior.get<std::string>()));
 	}
 	return remap;
 }
@@ -281,6 +318,13 @@ void BABehaviors::removeBoundAreaTag(const std::string& rName_)
 		const BABehavior& rBehavior = rBehaviors.objects[b];
 		bool used = rBehavior.availableCollisions.contains(id.id) || rBehavior.availableInteractions.contains(id.id) || std::find(rBehavior.tags.begin(), rBehavior.tags.end(), id) != rBehavior.tags.end();
 		if(used) throw std::runtime_error(std::format("BABehaviors: the tag {} is used by the behaviour {}.", rName_, rBehaviors.names[b]));
+	}
+	for(const BARemap* pRemap : {&this->remapShadowLevel, &this->remapSADXLevel, &this->remapSADXShape, &this->remapShadowShape})
+	{
+		for(const auto& [raw, rTags] : pRemap->tags)
+		{
+			if(std::find(rTags.begin(), rTags.end(), id) != rTags.end()) throw std::runtime_error(std::format("BABehaviors: the tag {} is given to the value 0x{:X} by Remaps.json.", rName_, raw));
+		}
 	}
 	Globals::Game::baTags.remove(id);
 	this->boundAreas.tags.erase(listed);
@@ -435,12 +479,56 @@ void BABehaviors::loadBoundAreas(const std::string& path_)
 void BABehaviors::saveBoundAreas() const
 {
 	std::string text = boundAreaJson(this->boundAreas).dump(2);
-	for(const std::filesystem::path& rPath : {std::filesystem::path("Assets/External/Collision/BoundAreas.json"), std::filesystem::path(SF_SOURCE_DIR) / "External/Collision/BoundAreas.json"})
+	for(const std::filesystem::path& rPath : {std::filesystem::path(Paths::BoundAreas), std::filesystem::path(Paths::SourceBoundAreas)})
 	{
 		std::filesystem::create_directories(rPath.parent_path());
 		std::ofstream out(rPath);
 		if(!out) throw std::runtime_error(std::format("BABehaviors: can't write {}.", rPath.string()));
 		out << text;
 	}
+}
+
+void BABehaviors::setRemapValue(const char* section_, BARemap& rRemap_, uint32_t raw_, PoolId behavior_, const std::vector<PoolId>& tags_)
+{
+	/* The key is written as the hex value; a key of the same number in another spelling ("0x00200001" and "0x200001") is replaced, not duplicated. */
+	std::string key = std::format("0x{:X}", raw_);
+	std::string behaviorName = Globals::Game::behaviors.names[behavior_.id];
+	for(const char* pPath : {Paths::Remaps, Paths::SourceRemaps})
+	{
+		nlohmann::json file;
+		{
+			std::ifstream in(pPath);
+			if(!in) throw std::runtime_error(std::format("BABehaviors: can't read {}.", pPath));
+			file = nlohmann::json::parse(in);
+		}
+		nlohmann::json& rValues = file.at(section_).at("values");
+		for(auto it = rValues.begin(); it != rValues.end();)
+		{
+			if(static_cast<uint32_t>(std::stoul(it.key(), nullptr, 0)) == raw_) it = rValues.erase(it);
+			else ++it;
+		}
+		if(tags_.empty()) rValues[key] = behaviorName;
+		else
+		{
+			nlohmann::json tagNames = nlohmann::json::array();
+			for(PoolId tag : tags_) tagNames.push_back(Globals::Game::baTags.names[tag.id]);
+			rValues[key] = {{"behavior", behaviorName}, {"tags", tagNames}};
+		}
+		std::ofstream out(pPath);
+		if(!out) throw std::runtime_error(std::format("BABehaviors: can't write {}.", pPath));
+		out << file.dump(2);
+	}
+
+	if(tags_.empty()) rRemap_.tags.erase(raw_);
+	else rRemap_.tags[raw_] = tags_;
+	for(auto& rEntry : rRemap_.entries)
+	{
+		if(rEntry.first == raw_)
+		{
+			rEntry.second = behavior_;
+			return;
+		}
+	}
+	rRemap_.entries.emplace_back(raw_, behavior_);
 }
 #endif

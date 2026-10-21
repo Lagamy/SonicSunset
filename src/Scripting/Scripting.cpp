@@ -1,7 +1,6 @@
 #include "Scripting.h"
 #include "ScriptInternal.h"
 #include "ScriptLog.h"
-#include "SASet.h"
 #include "Globals.h"
 #include "API.h"
 #include "EntityBehavior.h"
@@ -659,7 +658,7 @@ bool hasPrefabBehavior(const char* prefabName_)
 	return prefabBehaviors.contains(prefabName_);
 }
 
-void setupPrefab(PoolId entityId_, const char* prefabName_, const Ninja::SAPlacement* pPlacement_)
+void setupPrefab(PoolId entityId_, const char* prefabName_, const PrefabPlacement* pPlacement_)
 {
 	if(pState == nullptr) return;
 	auto found = prefabBehaviors.find(prefabName_);

@@ -12,12 +12,13 @@
   ]
  },
  "stageModels": {
-  "note": "Stage objects whose model is named by hand, by the INI's model name of the stage module (hypothesis, from the names). O PARASOL: external, the decompile of _Stg01.rel (FUN_8040e364): the byte of the record's scale x modulo 5 picks one of 5 parasol kinds (its debug text is 'KIND OF PARASOL'). O PIER: its guessed model, 'Pier Collision', is a white collision plane and 'Floating Pier' belongs to O BEWIND's chain (observed, user); the pier's own models are the variant models' (the straight pier is the first). O BED and O KASA: display code seen in a RAM dump of Emerald Coast act 1 (machine code): O BED draws 'Beach Bed' (_Stg01.rel 0x41C4), O KASA draws 'Straw Umbrella' (0xB0B8).",
+  "note": "Stage objects whose model is named by hand, by the INI's model name of the stage module (hypothesis, from the names). O PARASOL: external, the decompile of _Stg01.rel (FUN_8040e364): the byte of the record's scale x modulo 5 picks one of 5 parasol kinds (its debug text is 'KIND OF PARASOL'). O PIER: its guessed model, 'Pier Collision', is a white collision plane and 'Floating Pier' belongs to O BEWIND's chain (observed, user); the pier's own models are the variant models' (the straight pier is the first). O BED and O KASA: display code seen in a RAM dump of Emerald Coast act 1 (machine code): O BED draws 'Beach Bed' (_Stg01.rel 0x41C4), O KASA draws 'Straw Umbrella' (0xB0B8). O BGIRO (the spiked gate, observed (user): a metal structure with spikes that goes down, like a guillotine): its exec 0x6B38 sets the display 0x6674 (pseudocode FUN_80406674), whose code (relocations at 0x66F6/0x6702) draws the model at 0x1C5AFC, the model of 'Spike Gate' (seaobj_guillotine), and (0x6806/0x680E) the one at 0x241E44, that of 'Spike Gate Shadow'. The earlier first-model heuristic picked 'Rubber Rope' from the function after it (relocations at 0x70A6).",
   "values": {
    "O PARASOL": "Parasol A",
    "O PIER": "Pier (Straight)",
    "O BED": "Beach Bed",
-   "O KASA": "Straw Umbrella"
+   "O KASA": "Straw Umbrella",
+  "O BGIRO": "Spike Gate"
   }
  },
  "mainModels": {

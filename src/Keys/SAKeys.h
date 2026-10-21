@@ -33,6 +33,16 @@ struct SATextureSetKey
 };
 
 /*
+A texture of a level's .gvm set whose pixels are replaced by those of another entry of the same set, each color channel multiplied by brightness (alpha kept); the level file's "replacedTextures" (our choice, not disc data). The new image has the size of the entry it is taken from.
+*/
+struct SATextureReplacement
+{
+	std::string name;
+	std::string with;
+	float brightness;
+};
+
+/*
 A Ninja motion (NJS_MOTION) of a GameCube .rel module on the SADX disc: the module's path, the motion's file offset and
 the number of model nodes it animates (the file doesn't store it; SA Tools lists it). Imported the first time an
 instance plays it; nodeCount must match the instance's model.
@@ -47,6 +57,7 @@ struct SAMotionKey
 /*
 A kind of object an SADX stage places (SASet.h): the model it is drawn with, in a .rel, and its textures (the .gvm the texlist of the model names; path nullptr = untextured).
 name is the object list's name for the type (e.g. "SPRING"), for reading; motions and collisions are the ones the generator found. variantModels, if there are any, are the models the object's code chooses between (one with a null rel is not drawn), and variantCollisions the collision tables it chooses between (O PARASOL, O PIER; see tools/genSAEntityKeys.py): they replace model and collisions. Which one an entity gets is not in the key: it is Prefab::variantField (External/Prefabs/SADX/Placement.json).
+iconTextures (O ITEMBOX) are the texture ids of the TextureSet an object's icon quad takes, by the same value as the variants; the first is the one the model's own quad has, which is how Entity::setSAIcon finds the quad's node. The quad is drawn facing the camera.
 Which model an object uses is not stored as data: tools/genSAEntityKeys.py finds it from the relocations of the object's code (hypothesis). The order an object's display code turns by (Prefab::rotation) is not in the key either.
 */
 struct SAEntityKey
@@ -58,6 +69,7 @@ struct SAEntityKey
 	std::vector<SACollisionShapesKey> collisions = {};
 	std::vector<SAModelKey> variantModels = {};
 	std::vector<std::vector<SACollisionShapesKey>> variantCollisions = {};
+	std::vector<uint32_t> iconTextures = {};
 };
 
 /* An object type (SAPlacement::type) and what it is made of, in the stage that places it. */

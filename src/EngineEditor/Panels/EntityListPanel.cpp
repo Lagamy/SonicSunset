@@ -1,4 +1,5 @@
 #include "EntityListPanel.h"
+#include "Paths.h"
 #include "Globals.h"
 #include "API.h"
 #include "Editor.h"
@@ -174,7 +175,7 @@ void EntityListPanel::drawHubWorld()
 	{
 		std::error_code error;
 		std::vector<std::string> names;
-		for(const std::filesystem::directory_entry& rFile : std::filesystem::directory_iterator("Assets/Levels", error))
+		for(const std::filesystem::directory_entry& rFile : std::filesystem::directory_iterator(Paths::LevelsDir, error))
 		{
 			std::string name = rFile.path().filename().string();
 			if(rFile.is_directory() && std::filesystem::exists(rFile.path() / (name + ".json"))) names.push_back(name);
@@ -301,8 +302,9 @@ void EntityListPanel::drawEntities()
 		userNode[i] = addChild(parentNode, this->userFolders[i].name, std::format("u{}", i), i);
 	}
 
-	std::array<int, 2> gameNode{-1, -1};
-	std::array<std::array<int, 5>, 2> groupNode;
+	std::array<int, GameSourceCount> gameNode;
+	gameNode.fill(-1);
+	std::array<std::array<int, 5>, GameSourceCount> groupNode;
 	for(auto& rRow : groupNode) rRow.fill(-1);
 	std::vector<int> prefabNode(Globals::Game::prefabs.objects.size(), -1);
 	int ungroupedNode = -1;
@@ -316,7 +318,7 @@ void EntityListPanel::drawEntities()
 		int& rPrefabNode = prefabNode[prefabId_.id];
 		if(rPrefabNode >= 0) return rPrefabNode;
 		const Prefab& rPrefab = Globals::Game::prefabs.objects[prefabId_.id];
-		int game = rPrefab.game == SA_NINJA ? 0 : 1;
+		int game = gameSourceIndex(rPrefab.game);
 		int group = static_cast<int>(rPrefab.group);
 		if(gameNode[game] < 0) gameNode[game] = addChild(0, prefabGameFolder(rPrefab.game), std::format("a/{}", prefabGameName(rPrefab.game)), -1);
 		if(groupNode[game][group] < 0) groupNode[game][group] = addChild(gameNode[game], prefabGroupFolder(rPrefab.group), std::format("a/{}/{}", prefabGameName(rPrefab.game), prefabGroupFolder(rPrefab.group)), -1);

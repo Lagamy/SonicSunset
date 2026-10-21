@@ -1,9 +1,9 @@
 #pragma once
 #include "PoolId.h"
-#include "SAKeys.h"
-#include "STH2005Keys.h"
+#include "GameEntity.h"
 #include <functional>
 #include <string>
+#include <vector>
 
 /*
 The one place levels are made. loadLevel reads Assets/Levels/<name>/<name>.json (a level is a folder, copied from Levels/ at build: the file, and beside it the level's own Models, Textures, Collision and Prefabs), makes the Level with the engine the file names
@@ -63,8 +63,8 @@ namespace Loading
     struct NewLevelFile
     {
         std::string name;
-        std::string engine = "sadx";
-        std::string shader = "SA";
+        std::string engine = DefaultLevelEngine;
+        std::string shader = gameShaderName(DefaultSourceEngine);
         std::string landTableRel;
         std::string landTableOffset;
         std::string textures;
@@ -112,8 +112,4 @@ namespace Loading
     to stderr and skipped. loadLevel calls it before the level's entities are made (after the level's External prefabs exist).
     */
     void loadSourcePrefabs(const std::string& levelName_, PoolId levelId_);
-
-    /* Calls the function for every entity key of the generated entity tables the registry names (and the ones a stage's own code creates), each table in turn: the source of the prefabs (Prefab.h). The keys live for the whole run. */
-    void forEachSAEntityKey(const std::function<void(const SAEntityKey&)>& rFunction_);
-    void forEachONEEntityKey(const std::function<void(const STH2005::EntityKey&)>& rFunction_);
 }

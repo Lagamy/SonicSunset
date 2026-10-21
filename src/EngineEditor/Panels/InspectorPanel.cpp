@@ -652,6 +652,25 @@ static bool drawShapeFields(Physics::CollisionShape& rShape_, bool sadx_)
 		for(PoolId tag : rBehavior.tags) ImGui::BulletText("tag %s", Globals::Game::baTags.names[tag.id].c_str());
 		ImGui::Text("Collides with %u tags, interacts with %u", static_cast<uint32_t>(rBehavior.availableCollisions.size()), static_cast<uint32_t>(rBehavior.availableInteractions.size()));
 	}
+	/* The shape's own tags, besides its behaviour's (CollisionShape::tags): what the other side of a contact sees as well. */
+	char tagsLabel[48];
+	std::snprintf(tagsLabel, sizeof(tagsLabel), "Own tags (%u)###ownTags", static_cast<uint32_t>(rShape_.tags.size()));
+	if(ImGui::TreeNode(tagsLabel))
+	{
+		const auto& rTags = Globals::Game::baTags;
+		for(uint32_t t = 0; t < rTags.objects.size(); t++)
+		{
+			if(!rTags.alive[t]) continue;
+			PoolId tagId(t, rTags.generation[t]);
+			auto has = std::find(rShape_.tags.begin(), rShape_.tags.end(), tagId);
+			bool checked = has != rShape_.tags.end();
+			if(!ImGui::Checkbox(rTags.names[t].c_str(), &checked)) continue;
+			if(checked) rShape_.tags.push_back(tagId);
+			else rShape_.tags.erase(has);
+			changed = true;
+		}
+		ImGui::TreePop();
+	}
 	changed |= drawFieldValues(Globals::Game::baBehaviors.fieldsOf(rShape_.behavior), rShape_.values);
 	return changed;
 }
@@ -714,7 +733,7 @@ void InspectorPanel::drawBoundArea(PoolId entityId_)
 		shapeBadge(kind, IM_COL32(190, 190, 190, 255));
 		if(ImGui::TreeNode("Shape", "Shape %u: %s (form %u), attr 0x%08X", i, shapeKindName(kind), rShape.form, rShape.attr))
 		{
-			changed |= drawShapeFields(rShape, rEntity.sourceEngine == SA_NINJA);
+			changed |= drawShapeFields(rShape, usesNinjaShapes(rEntity.sourceEngine));
 			if(ImGui::SmallButton("Remove")) removeIndex = static_cast<int>(i);
 			if(prefabId != UninitializedPoolId)
 			{
@@ -734,7 +753,7 @@ void InspectorPanel::drawBoundArea(PoolId entityId_)
 	ImGui::PopID();
 	if(addKind != ShapeOther)
 	{
-		shapes.push_back(defaultShape(addKind, rEntity.sourceEngine == SA_NINJA));
+		shapes.push_back(defaultShape(addKind, usesNinjaShapes(rEntity.sourceEngine)));
 		changed = true;
 	}
 	ImGui::EndChild();
@@ -780,7 +799,7 @@ void InspectorPanel::drawBoundArea(PoolId entityId_)
 			if(open)
 			{
 				/* An edit is a removal of the old shape and an addition of the new one in the scope's set, so every entity of the prefab and the file follow at once. */
-				if(drawShapeFields(edited, rEntity.sourceEngine == SA_NINJA))
+				if(drawShapeFields(edited, usesNinjaShapes(rEntity.sourceEngine)))
 				{
 					this->tryEdit([&]
 					{
@@ -810,7 +829,7 @@ void InspectorPanel::drawBoundArea(PoolId entityId_)
 		ImGui::PushID("addShapeToAll");
 		int addAllKind = shapeIconRow(ShapeOther);
 		ImGui::PopID();
-		if(addAllKind != ShapeOther) this->tryEdit([&] { addPrefabShape(prefabId, defaultShape(addAllKind, rEntity.sourceEngine == SA_NINJA), scope); });
+		if(addAllKind != ShapeOther) this->tryEdit([&] { addPrefabShape(prefabId, defaultShape(addAllKind, usesNinjaShapes(rEntity.sourceEngine)), scope); });
 		ImGui::EndChild();
 	}
 
@@ -1378,7 +1397,7 @@ void InspectorPanel::drawMesh(PoolId entityId_)
 		if(rChoice.kind != MeshChoiceKind::Default && ImGui::SmallButton("Default")) this->giveMesh(entityId_, forPrefab_, MeshChoice{});
 		std::string external = this->pickExternalModel("##external");
 		if(!external.empty()) this->giveMesh(entityId_, forPrefab_, MeshChoice{MeshChoiceKind::External, external});
-		if(rEntity.sourceEngine == STH2005_ONE && ImGui::BeginCombo("##archive", "Model of the entity's archive..."))
+		if(!rEntity.discMeshOptions().empty() && ImGui::BeginCombo("##archive", "Model of the entity's archive..."))
 		{
 			for(const std::string& rName : rEntity.discMeshOptions())
 			{
@@ -1506,7 +1525,7 @@ void InspectorPanel::drawTexture(PoolId entityId_)
 		if(rChoice.kind != TextureChoiceKind::Default && ImGui::SmallButton("Default")) this->giveTexture(entityId_, forPrefab_, TextureChoice{});
 		std::string external = this->pickExternalTexture("##external");
 		if(!external.empty()) this->giveTexture(entityId_, forPrefab_, TextureChoice{TextureChoiceKind::External, external});
-		if(rEntity.sourceEngine == STH2005_ONE && ImGui::BeginCombo("##archive", "Texture of the model's archive..."))
+		if(!rEntity.discTextureOptions().empty() && ImGui::BeginCombo("##archive", "Texture of the model's archive..."))
 		{
 			for(const std::string& rName : rEntity.discTextureOptions())
 			{

@@ -4,7 +4,7 @@
 #include "Globals.h"
 #include "API.h"
 #include "ResourceKeys.h"
-#include "ResourceLoader.h"
+#include "GameLoaders.h"
 #include <algorithm>
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>

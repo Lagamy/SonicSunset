@@ -71,7 +71,7 @@ struct BoundAreaFunction
 /*
 What a collision is and does, stored in Globals::Game::behaviors (a PoolMap named by the behaviour's BABehaviorKey) and found by its PoolId. A level triangle gets one when the collision is loaded
 (Physics::Collision::behaviorOf) and an object's shape too (Physics::CollisionShape::behavior), from the remaps in External/Collision/Remaps.json (BABehaviors.h); the collision system only compares PoolIds and tags.
-- tags: what it is (PoolIds in Globals::Game::baTags).
+- tags: what it is (PoolIds in Globals::Game::baTags). A collision may have tags of its own besides its behaviour's (Physics::Collision::tagsByValue for a level's values, CollisionShape::tags): the other side sees both.
 - availableCollisions: the tags it is stopped by (a body is stopped by Solid). When a shape of this behaviour overlaps a collision whose behaviour has one of them, the move is resolved: a physics entity's
   capsule or sphere is pushed out. Nothing else is kept per tag: a rule is only "is there one".
 - availableInteractions: for a tag, the functions to call (a list: a tag may be under several) when this behaviour overlaps a collision with that tag. Called with this behaviour's entity as the parent and the other as the contact (UninitializedPoolId for
@@ -88,36 +88,46 @@ struct BABehavior
 	std::unordered_map<uint32_t, std::vector<BAInteraction>> availableInteractions = {};
 	std::string fields = {};
 
-	/* True if this behaviour is stopped by a tag the other has. */
-	bool collidesWith(const BABehavior& rOther_) const
+	/*
+	The three questions below look at the other side's tags: its behaviour's, plus pExtra_ (the tags its collision has of its own, Physics::Collision::tagsByValue / CollisionShape::tags; nullptr = none). Only the other side's tags are asked about, so the extras
+	never change this behaviour's own rules.
+	*/
+	template <typename Callback>
+	static void forEachTagOf(const BABehavior& rOther_, const std::vector<PoolId>* pExtra_, Callback callback_)
 	{
-		for(PoolId tag : rOther_.tags)
+		for(PoolId tag : rOther_.tags) callback_(tag);
+		if(pExtra_ != nullptr)
 		{
-			if(this->availableCollisions.contains(tag.id)) return true;
+			for(PoolId tag : *pExtra_) callback_(tag);
 		}
-		return false;
+	}
+
+	/* True if this behaviour is stopped by a tag the other has. */
+	bool collidesWith(const BABehavior& rOther_, const std::vector<PoolId>* pExtra_ = nullptr) const
+	{
+		bool found = false;
+		forEachTagOf(rOther_, pExtra_, [&](PoolId tag_) { found = found || this->availableCollisions.contains(tag_.id); });
+		return found;
 	}
 
 	/* True if this behaviour has an interaction for a tag the other has. */
-	bool interactsWith(const BABehavior& rOther_) const
+	bool interactsWith(const BABehavior& rOther_, const std::vector<PoolId>* pExtra_ = nullptr) const
 	{
-		for(PoolId tag : rOther_.tags)
-		{
-			if(this->availableInteractions.contains(tag.id)) return true;
-		}
-		return false;
+		bool found = false;
+		forEachTagOf(rOther_, pExtra_, [&](PoolId tag_) { found = found || this->availableInteractions.contains(tag_.id); });
+		return found;
 	}
 
 	/* Calls callback_ with every function this behaviour has for a tag the other has (the lists of all the other's tags; the same function twice is called twice, the collision system drops the repeat). */
 	template <typename Callback>
-	void forEachInteraction(const BABehavior& rOther_, Callback callback_) const
+	void forEachInteraction(const BABehavior& rOther_, Callback callback_, const std::vector<PoolId>* pExtra_ = nullptr) const
 	{
-		for(PoolId tag : rOther_.tags)
+		forEachTagOf(rOther_, pExtra_, [&](PoolId tag_)
 		{
-			auto found = this->availableInteractions.find(tag.id);
-			if(found == this->availableInteractions.end()) continue;
+			auto found = this->availableInteractions.find(tag_.id);
+			if(found == this->availableInteractions.end()) return;
 			for(const BAInteraction& rInteraction : found->second) callback_(rInteraction);
-		}
+		});
 	}
 
 	/* True if it has any rule at all: a shape whose behaviour has none never starts a contact test. */

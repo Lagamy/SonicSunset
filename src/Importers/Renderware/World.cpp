@@ -156,6 +156,7 @@ static std::vector<Graphics::RenderWareSubmesh> readNativeSector(const std::vect
 
 		Graphics::RenderWareSubmesh submesh;
 		submesh.textureName = rMaterials_[material].textureName;
+		submesh.mesh.sourceMesh = m;
 		std::unordered_map<uint64_t, uint32_t> vertexByIndices;
 
 		uint32_t cursor = base + listsStart + listOffset;
@@ -222,6 +223,7 @@ static std::vector<Graphics::RenderWareSubmesh> readNativeSector(const std::vect
 					}
 					found = vertexByIndices.emplace(key, static_cast<uint32_t>(submesh.mesh.verticies.size())).first;
 					submesh.mesh.verticies.push_back(vertex);
+					submesh.mesh.sourceVertex.push_back(positionIndex);
 				}
 				strip.push_back(found->second);
 			}

@@ -122,7 +122,17 @@ struct BasicMesh
 	GLuint EBO;
 
 	VertexArray verticies;
-	std::vector<uint32_t> indicies; 
+	std::vector<uint32_t> indicies;
+
+	/*
+	Where a disc mesh came from, for the HubWorld.gltf pipeline (TODO.md, step 2). Set only by the SA and Shadow disc importers, empty / 0 for meshes made otherwise.
+	sourceVertex has one entry per vertex: the index of its position in the file's position array (SA: the attach's vertex array; Shadow world: the sector's position
+	attribute array; Shadow dff: the geometry's vertex array). Vertices split per UV, color or corner share an index, so the index is not unique in a mesh.
+	sourceMesh is the mesh's own id in its file: SA = file offset of the meshset, Shadow world = index of the mesh in the sector's BinMesh, Shadow dff = material index.
+	Hypothesis, not decided: with the container's own id (SA node / COL, world sector index, atomic) it identifies a piece.
+	*/
+	std::vector<uint32_t> sourceVertex;
+	uint32_t sourceMesh = 0;
 	bool alive = false; 
 	
 	void create(); 

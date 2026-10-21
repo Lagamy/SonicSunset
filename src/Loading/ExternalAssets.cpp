@@ -1,4 +1,5 @@
 #include "ExternalAssets.h"
+#include "Paths.h"
 #include "GPU_Globals.h"
 #include "ModelFile.h"
 #include "TextureFile.h"
@@ -14,7 +15,7 @@ namespace
 {
 namespace fs = std::filesystem;
 
-const fs::path ExternalRoot = "Assets/External";
+const fs::path ExternalRoot = Paths::ExternalDir;
 
 /* The files in dir_ whose name ends with suffix_, sorted so registration order does not depend on the file system. */
 std::vector<fs::path> filesWithSuffix(const fs::path& rDir_, const std::string& rSuffix_)
@@ -150,7 +151,7 @@ Graphics::ExternalPools& poolsOf(ExternalScope scope_)
 
 fs::path folderOf(ExternalScope scope_)
 {
-	return scope_ == ExternalScope::Project ? ExternalRoot : fs::path("Assets/Levels") / levelScopeName;
+	return scope_ == ExternalScope::Project ? ExternalRoot : fs::path(Paths::LevelsDir) / levelScopeName;
 }
 
 #ifdef EDITOR
@@ -160,8 +161,8 @@ Throws std::runtime_error if the copy fails.
 */
 void mirrorToSource(ExternalScope scope_, const fs::path& rGamePath_)
 {
-	fs::path gameBase = scope_ == ExternalScope::Project ? ExternalRoot : fs::path("Assets/Levels");
-	fs::path target = fs::path(SF_SOURCE_DIR) / (scope_ == ExternalScope::Project ? "External" : "Levels") / fs::relative(rGamePath_, gameBase);
+	fs::path gameBase = scope_ == ExternalScope::Project ? ExternalRoot : fs::path(Paths::LevelsDir);
+	fs::path target = fs::path(Paths::SourceDir) / (scope_ == ExternalScope::Project ? "External" : "Levels") / fs::relative(rGamePath_, gameBase);
 	std::error_code error;
 	fs::create_directories(target.parent_path(), error);
 	if(!error) fs::copy_file(rGamePath_, target, fs::copy_options::overwrite_existing, error);

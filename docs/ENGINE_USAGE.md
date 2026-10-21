@@ -7,7 +7,7 @@ How to use the engine as it is: load a level, describe a level in JSON, add a le
 Levels are made in one place: `Loading::loadLevel(name)` (`src/Loading/LevelLoader.cpp`). From Lua:
 
 ```lua
-local level = sf.loadLevel("EmeraldCoast")   -- or "StationSquare4", "Stg0100", "Stg0000"; returns the level handle
+local level = sf.loadLevel("EmeraldCoast")   -- or "Stg0100", "Stg0000"; returns the level handle
 sf.unloadLevel(level)                         -- queued; done at the start of the next gameplay tick
 sf.levelExists(level)                         -- false once the old level is gone
 sf.levels()                                  -- table of every level's handle
@@ -34,6 +34,7 @@ All paths are disc paths, as in `ResourceKeys.h`. Offsets are numbers or strings
 | `meshes` | optional, list of `{ "index", "mesh": model }`: the model of the level's own entity number `index`, written when it differs from its prefab's; applied before `textures`; one that can't be used is reported and the entity keeps its own |
 | `textures` | the `.gvm` texture set |
 | `skippedTextures` | texture names whose pieces are not drawn (optional) |
+| `replacedTextures` | optional, list of `{ "name", "with", "brightness" }`: the set entry `name` gets the pixels of the entry `with` (any size, taken from it) with its colors multiplied by `brightness` (alpha kept); read back from the GPU, so the stored sRGB values are scaled; an entry not in the set fails the level |
 | `placementFiles` | SET files (optional) |
 | `entityTable` | name of a generated `SAPlacedEntityKey` table (optional) |
 | `typeNames` | name of a type id to name map, for the markers (optional) |

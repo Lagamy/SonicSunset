@@ -17,7 +17,7 @@ void Text::selectMode(int step_)
 }
 
 /* The name an entity has in the shown mode (a reference into the pools' names, valid for the frame); empty if it has none (no instance, no collision). */
-static const std::string& nameOf(const Entity& rEntity_, uint32_t index_, Text::Mode mode_)
+static std::string nameOf(const Entity& rEntity_, uint32_t index_, Text::Mode mode_)
 {
 	static const std::string None;
 	if(mode_ == Text::EntityName) return Globals::Game::entities.names[index_];
@@ -27,9 +27,7 @@ static const std::string& nameOf(const Entity& rEntity_, uint32_t index_, Text::
 		return Globals::Physics::collisions[rEntity_.collisionId].name;
 	}
 	if(rEntity_.instanceId == UninitializedPoolId) return rEntity_.isExternalOnly() && rEntity_.pOverrideModel != nullptr ? rEntity_.pOverrideModel->name : None;
-	if(rEntity_.sourceEngine == SA_NINJA) return saMeshes.names[saInstances[rEntity_.instanceId].saMeshId.id];
-	const ONEInstance& rInstance = oneInstances[rEntity_.instanceId];
-	return oneArchives[rInstance.archiveId].meshNames[rInstance.meshIndex];
+	return rEntity_.discMesh();
 }
 
 void Text::draw(const Camera& rCamera_)
@@ -85,7 +83,7 @@ void Text::draw(const Camera& rCamera_)
 		if(glm::distance(position, rCamera_.position) > distance) continue;
 		glm::vec3 anchor = position + glm::vec3(0.0f, LabelHeight, 0.0f);
 		if(!sphereInFrustum(planes, anchor, 0.0f)) continue;
-		const std::string& rLabel = nameOf(rEntity, i, this->mode);
+		const std::string rLabel = nameOf(rEntity, i, this->mode);
 		if(rLabel.empty()) continue;
 
 		glm::vec4 clip = viewProjection * glm::vec4(anchor, 1.0f);

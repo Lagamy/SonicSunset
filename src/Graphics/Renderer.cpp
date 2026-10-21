@@ -57,7 +57,7 @@ void Renderer::init()
 	rFloor.indicies = {0, 1, 2, 0, 2, 3};
 	rFloor.create();
 
-	dashTrail.init();
+	initGameEffects();
 }
 
 void Renderer::run(Camera& rCamera_, bool clearColor_) 
@@ -66,6 +66,7 @@ void Renderer::run(Camera& rCamera_, bool clearColor_)
 
 	// bind cameras UBO to binding = 0 (matches shader); must happen before drawing
 	glBindBufferBase(GL_UNIFORM_BUFFER, 0, rCamera_.UBOId);
+	cameraFacing = glm::transpose(glm::mat3(rCamera_.view));
 
 	/* The debug floor is not drawn while a level is shown. */
 	// Shader& rDefaultShader = getShaderByName("Default");
@@ -83,6 +84,20 @@ void Renderer::run(Camera& rCamera_, bool clearColor_)
 	std::array<glm::vec4, 6> planes = rCamera_.frustumPlanes();
 	float maxDistance = rCamera_.farPlane;
 	Globals::Game::spatialIndex.rebuildIfDirty();
+
+	/* The editor's selected entities are drawn last, whatever the view and the distance, so they are skipped by the culled draws below. */
+	std::vector<PoolId> alwaysDrawn;
+#ifdef EDITOR
+	if(editor.active) alwaysDrawn = editor.entityList.selection();
+#endif
+	auto isAlwaysDrawn = [&](uint32_t index_)
+	{
+		for(PoolId id : alwaysDrawn)
+		{
+			if(id.id == index_) return true;
+		}
+		return false;
+	};
 	if(Globals::Game::spatialIndex.built)
 	{
 		/* The static entities come from the spatial index, already inside the view; the dynamic ones are walked and culled by draw. */
@@ -91,31 +106,35 @@ void Renderer::run(Camera& rCamera_, bool clearColor_)
 		Globals::Game::spatialIndex.queryVisible(planes, rCamera_.position, maxDistance, visible);
 		for(uint32_t index : visible)
 		{
+			if(isAlwaysDrawn(index)) continue;
 			Globals::Game::entities.objects[index].draw(planes, rCamera_.position, maxDistance);
 		}
 		Globals::Game::spatialIndex.pruneDynamic();
 		for(PoolId entityId : Globals::Game::spatialIndex.dynamicEntities)
 		{
-			if(entityExists(entityId)) Globals::Game::entities.objects[entityId.id].draw(planes, rCamera_.position, maxDistance);
+			if(entityExists(entityId) && !isAlwaysDrawn(entityId.id)) Globals::Game::entities.objects[entityId.id].draw(planes, rCamera_.position, maxDistance);
 		}
 	}
 	else
 	{
 		for(uint32_t i = 0; i < Globals::Game::entities.objects.size(); i++)
 		{
-			if(Globals::Game::entities.alive[i]) Globals::Game::entities.objects[i].draw(planes, rCamera_.position, maxDistance);
+			if(Globals::Game::entities.alive[i] && !isAlwaysDrawn(i)) Globals::Game::entities.objects[i].draw(planes, rCamera_.position, maxDistance);
 		}
 	}
 
-	dashTrail.draw();
-	effectBalls.draw();
-	dashSpheres.draw();
-	sonicTrail.draw();
+	for(PoolId id : alwaysDrawn)
+	{
+		if(entityExists(id)) Globals::Game::entities.objects[id.id].draw(planes, rCamera_.position, maxDistance, true);
+	}
+
+	drawGameEffects();
 }
   
 void Renderer::drawEntity(Camera& rCamera_, Entity& rEntity_)
 {
 	glBindBufferBase(GL_UNIFORM_BUFFER, 0, rCamera_.UBOId);
+	cameraFacing = glm::transpose(glm::mat3(rCamera_.view));
 	std::array<glm::vec4, 6> planes = rCamera_.frustumPlanes();
 	rEntity_.draw(planes, rCamera_.position, rCamera_.farPlane);
 }
@@ -154,17 +173,11 @@ void Renderer::runAll(Camera* pEditorCamera_)
 
 void Renderer::destroy() 
 {
-	dashTrail.destroy();
-	effectBalls.destroy();
-	dashSpheres.destroy();
-	sonicTrail.destroy();
+	destroyGameGraphics();
 	glDeleteBuffers(1, &this->boneBuffer); 
-	oneArchives.clear();
 	basicMeshes.clear(); 
 	textures.clear();
 	shaders.clear(); 
-	saMeshes.clear();
-	relModules.clear(); 
 }
 
 }

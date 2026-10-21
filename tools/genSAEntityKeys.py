@@ -71,6 +71,10 @@ VARIANT_FIELD = {"O PIER": 1}
 # scale x byte modulo 5 as for its models, and the 5 pointers of kinds 0 to 4 are used; a RAM dump of Emerald Coast act 1 shows the kind 4 table at 0x249D38 and the kind 5 table (= kind 0) at 0x249CD8).
 VARIANT_COLLISIONS = {"O PARASOL": (0x249D98, 5, 2), "O PIER": (0x24A034, 2, 2)}
 
+# O ITEMBOX's icons: the display function (_Main.rel 0xA9258, Ghidra FUN_804a9258; read from the pseudocode, not run) writes the icon quad's texture id from a table at _Main.rel 0x2C1550 (9 entries of 8 bytes,
+# the id first) indexed by the record's scale x (the float at work +0x2C; the work area has the position at +0x20, so +0x2C is the scale's x). The ids of types 0 to 8, in obj_regular.gvm order; 35 (item_speed) is the model's own, which finds the quad.
+ICON_TEXTURES = {"O ITEMBOX": [0x23, 0x48, 0x21, 0x20, 0x22, 0x47, 0x1F, 0x49, 0x46]}
+
 # O KASA (display code seen in a RAM dump of Emerald Coast act 1, machine code, _Stg01.rel 0xB0B8) turns about y only.
 ROTATION_OVERRIDES = {"O KASA": [("Y", 1, 0, False)]}
 # O JUMP (the launch board): its display (_Stg01.rel 0x9560, called by the display function 0x951c; machine code) pushes the matrix, translates, rotates about z, y, x by the task's angles and draws the
@@ -443,8 +447,10 @@ def main():
                 for k in range(kinds):
                     variant_collisions.append("{" + f'{{"{mod.name}", 0x{be(b, array + 4 * k):X}, {entries}}}' + "}")
             tail = ""
-            if variant_collisions:
+            if variant_collisions or name in ICON_TEXTURES:
                 tail = f", {{{', '.join(variant_collisions)}}}"
+            if name in ICON_TEXTURES:
+                tail += f", {{{', '.join(str(t) for t in ICON_TEXTURES[name])}}}"
             if rotation or name in VARIANT_FIELD:
                 placement[name] = {}
                 if rotation:

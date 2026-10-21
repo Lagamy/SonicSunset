@@ -108,9 +108,9 @@ add_executable(SonicSunset
 	src/Objects/SpatialIndex.cpp
 	src/Loading/ResourceLoader.cpp
 	src/Loading/LevelLoader.cpp
-	src/Loading/PlayerLoader.cpp
+	src/Game/PlayerLoader.cpp
 	src/Loading/ExternalAssets.cpp
-	src/EngineEditor/Debug/DebugSetup.cpp
+	src/Game/DebugSetup.cpp
 	src/Physics/Collision.cpp
 	src/Physics/QuadTree.cpp
 	src/Physics/PhysicsSystem.cpp
@@ -121,6 +121,17 @@ add_executable(SonicSunset
 	${STB_DIR}/stb_image_write.cpp
 	${CGLTF_DIR}/cgltf.cpp
 	src/Misc/API.cpp
+
+	# The game's part of the engine (the seam, see docs/ARCHITECTURE.md): what the engine files include or call by fixed name.
+	src/Game/GameEntity.cpp
+	src/Game/GameLevel.cpp
+	src/Game/GamePrefab.cpp
+	src/Game/GameAPI.cpp
+	src/Game/GameLevelLoader.cpp
+	src/Game/GameLoaders.cpp
+	src/Game/GameGraphics.cpp
+	src/Game/GameGraphicsAPI.cpp
+	src/Game/GameScriptAPI.cpp
 )
 
 if(EDITOR)
@@ -136,9 +147,11 @@ if(EDITOR)
 		src/EngineEditor/Panels/EntityListPanel.cpp
 		src/EngineEditor/Panels/InspectorPanel.cpp
 		src/EngineEditor/Panels/AssetPanel.cpp
-		src/EngineEditor/Panels/AssetThumbnails.cpp
+		src/Game/AssetThumbnails.cpp
 		src/EngineEditor/Panels/PrefabPanel.cpp
 		src/EngineEditor/Panels/PrefabThumbnails.cpp
+		src/Game/GamePrefabThumbnails.cpp
+		src/Game/LibraryExport.cpp
 		${IMGUI_DIR}/imgui.cpp
 		${IMGUI_DIR}/imgui_draw.cpp
 		${IMGUI_DIR}/imgui_widgets.cpp
@@ -153,6 +166,7 @@ endif()
 
 target_include_directories(SonicSunset PUBLIC
     src
+	src/Game
 	src/Objects
 	src/Gameplay
 	src/Scripting

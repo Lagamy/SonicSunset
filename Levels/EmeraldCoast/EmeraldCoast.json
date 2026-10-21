@@ -12,7 +12,15 @@
   },
   "textures": "BEACH01.GVM",
   "skippedTextures": [
-    "m8_shadows"
+    "m8_shadows",
+    "m256_ext03"
+  ],
+  "replacedTextures": [
+    {
+      "name": "m128_sand001",
+      "with": "m128_cos020",
+      "brightness": 0.6
+    }
   ],
   "placementFiles": [
     "Set0100S.bin"
@@ -430,5 +438,40 @@
         ]
       }
     ]
-  }
+  },
+  "entities": [
+    {
+      "name": "DeathPlain",
+      "position": [
+        2619.4921875,
+        -22.565011978149414,
+        826.2574462890625
+      ],
+      "behaviors": [],
+      "shapes": [
+        {
+          "kind": 0,
+          "form": 3,
+          "push": 0,
+          "damage": 0,
+          "attr": 0,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "a": 4000.0,
+          "b": 1.0,
+          "c": 2000.0,
+          "d": 0.0,
+          "angle": [
+            0,
+            0,
+            0
+          ],
+          "behavior": null
+        }
+      ]
+    }
+  ]
 }

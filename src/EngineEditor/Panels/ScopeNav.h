@@ -11,7 +11,7 @@ The first two levels of the file browsers of the Assets and Prefabs tabs (AssetP
 struct ScopeNav
 {
 	/* The game index of External under Global; External under Level is Global + 1. */
-	static constexpr int Global = 2;
+	static constexpr int Global = GameSourceCount;
 
 	int openScope = -1;
 	int openGame = -1;
@@ -23,7 +23,10 @@ struct ScopeNav
 	}
 	static std::vector<std::string> gameLabels()
 	{
-		return {prefabGameFolder(SA_NINJA), prefabGameFolder(STH2005_ONE), "External"};
+		std::vector<std::string> labels;
+		for(SourceEngineEnum game : GameSources) labels.push_back(prefabGameFolder(game));
+		labels.push_back("External");
+		return labels;
 	}
 	void pickScope(int clicked_)
 	{
@@ -31,7 +34,7 @@ struct ScopeNav
 	}
 	void pickGame(int clicked_)
 	{
-		if(clicked_ >= 0) this->openGame = clicked_ < 2 ? clicked_ : Global + this->openScope;
+		if(clicked_ >= 0) this->openGame = clicked_ < GameSourceCount ? clicked_ : Global + this->openScope;
 	}
 
 	/* True inside a disc game under Level: the lists show only what the open level uses. */
@@ -44,7 +47,7 @@ struct ScopeNav
 	void addPathNames(std::vector<std::string>& rNames_) const
 	{
 		if(this->openScope >= 0) rNames_.push_back(this->openScope == 0 ? "Global" : "Level");
-		if(this->openGame >= 0) rNames_.push_back(this->openGame >= Global ? "External" : prefabGameFolder(this->openGame == 0 ? SA_NINJA : STH2005_ONE));
+		if(this->openGame >= 0) rNames_.push_back(this->openGame >= Global ? "External" : prefabGameFolder(GameSources[this->openGame]));
 	}
 
 	/* A path bar click on the button at depth depth_ (0 = the browser's own name, 1 = the scope, 2 = the game): forgets everything below it. */

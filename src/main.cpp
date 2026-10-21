@@ -1,4 +1,5 @@
 #include <format>
+#include "Paths.h"
 #include <cstdio>
 #include <cstdlib>
 #include "RenderStats.h"
@@ -13,7 +14,7 @@
 #include "GPU_Globals.h"
 #include "API.h"
 #include "Camera.h"
-#include "GCDisc.h"
+#include "GameDiscs.h"
 #include "ResourceKeys.h"
 #include "DebugSetup.h"
 #include "LevelLoader.h"
@@ -89,7 +90,7 @@ int main() {
 	Graphics::renderer.init(); 
 	Globals::Game::baBehaviors.init();
 	/* The raw collision values of each game and the behaviour each has (Assets/External/Collision/Remaps.json); throws if it is wrong, nothing can be resolved without it. */
-	Globals::Game::baBehaviors.loadRemaps("Assets/External/Collision/Remaps.json");
+	Globals::Game::baBehaviors.loadRemaps(Paths::Remaps);
 	/* Where the players' models and motions are on the discs (Assets/External/Players/Sonic.json, Shadow.json); throws if one is wrong, no player can be made without them. */
 	Loading::loadPlayerKeys();
 	/* The gameplay is the Lua scripts of Assets/Scripts (main.lua loads sadx/main.lua for Sonic and shadow/main.lua for Shadow, J switches the player, see Scripting.h; game.lua, run once the discs are open, loads the level and the players); a script that fails to load is reported on stderr and the game runs without it. */
@@ -98,7 +99,7 @@ int main() {
 	/* The project's own scripts (Assets/External/Scripts/main.lua, if there is one): after the games', before registerPrefabs reads the behaviours. */
 	Scripting::loadExternalScripts();
 	/* The tags and behaviours the editor made (Assets/External/Collision/BoundAreas.json, if there is one): they name onTouch functions, so after the scripts; throws if it is wrong. */
-	Globals::Game::baBehaviors.loadBoundAreas("Assets/External/Collision/BoundAreas.json");
+	Globals::Game::baBehaviors.loadBoundAreas(Paths::BoundAreas);
 	/* After main.lua: a prefab reads the behaviours the scripts registered for it. Before any level or entity is made. */
 	registerPrefabs();
 	/* Their groups and the Shadow objects' placement layouts (Assets/External/Prefabs/Groups.json, STH2005/Placement.json). */

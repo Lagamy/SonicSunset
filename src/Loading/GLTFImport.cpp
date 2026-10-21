@@ -1,4 +1,5 @@
 #include "GLTFImport.h"
+#include "Paths.h"
 #include "CollisionFile.h"
 #include "GLTFFile.h"
 #include "ModelFile.h"
@@ -18,8 +19,8 @@ namespace
 {
 namespace fs = std::filesystem;
 
-const fs::path GameRoot = "Assets/Levels";
-const fs::path SourceRoot = fs::path(SF_SOURCE_DIR) / "Levels";
+const fs::path GameRoot = Paths::LevelsDir;
+const fs::path SourceRoot = fs::path(Paths::SourceDir) / "Levels";
 
 fs::path levelFolder(const fs::path& rRoot_, const std::string& rLevelName_)
 {

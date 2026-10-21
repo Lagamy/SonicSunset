@@ -1,6 +1,7 @@
 #include "DebugSetup.h"
 #include "API.h"
 #include "Globals.h"
+#include "GameDiscs.h"
 #include "GPU_Globals.h"
 #ifdef EDITOR
 #include "Editor.h"

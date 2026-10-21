@@ -321,7 +321,7 @@ Physics::CollisionMesh readGLTFCollision(const std::string& rPath_)
 	return mesh;
 }
 
-void writeGLTF(const std::string& rPath_, const GLTFScene& rScene_, FieldEncoding encoding_)
+void writeGLTF(const std::string& rPath_, const GLTFScene& rScene_)
 {
 	using Json = nlohmann::ordered_json;
 	constexpr uint32_t FloatType = 5126, UintType = 5125, ArrayTarget = 34962, ElementTarget = 34963, MaxExactFloat = 16777215;
@@ -392,41 +392,35 @@ void writeGLTF(const std::string& rPath_, const GLTFScene& rScene_, FieldEncodin
 			if(!rPrimitive.uvs.empty()) attributes["TEXCOORD_0"] = addAccessor(rPrimitive.uvs.data(), count, 2, FloatType, ArrayTarget, "VEC2", Json());
 			if(!rPrimitive.colors.empty()) attributes["COLOR_0"] = addAccessor(rPrimitive.colors.data(), count, 4, FloatType, ArrayTarget, "VEC4", Json());
 
+			/*
+			The source fields are written as extra UV sets, the only per-vertex data Blender's round trip keeps exactly (docs/TODO.md, step 0): TEXCOORD_1 = (SRC, SRCFLAG), TEXCOORD_2 = (ORIG.x, ORIG.y),
+			TEXCOORD_3 = (ORIG.z, SRCIDX), float32. The integers are exact up to 2^24 - 1 and larger ones throw. TEXCOORD_0 stays the uv.
+			*/
 			bool hasSource = !rPrimitive.src.empty() || !rPrimitive.srcFlag.empty() || !rPrimitive.srcIdx.empty();
 			bool hasOrig = !rPrimitive.orig.empty();
-			if(encoding_ == FieldEncoding::Custom)
+			auto exact = [&](const std::vector<uint32_t>& rValues_, size_t i_, const char* pName_) -> float
 			{
-				if(!rPrimitive.src.empty()) attributes["_SRC"] = addAccessor(rPrimitive.src.data(), count, 1, UintType, ArrayTarget, "SCALAR", Json());
-				if(!rPrimitive.srcFlag.empty()) attributes["_SRCFLAG"] = addAccessor(rPrimitive.srcFlag.data(), count, 1, UintType, ArrayTarget, "SCALAR", Json());
-				if(!rPrimitive.srcIdx.empty()) attributes["_SRCIDX"] = addAccessor(rPrimitive.srcIdx.data(), count, 1, UintType, ArrayTarget, "SCALAR", Json());
-				if(hasOrig) attributes["_ORIG"] = vec3Accessor(rPrimitive.orig, ArrayTarget, false);
+				if(rValues_.empty()) return 0.0f;
+				if(rValues_[i_] > MaxExactFloat) fail(std::format("mesh {}: {} {} is past 2^24 - 1, too large for a float32 UV set.", m, pName_, rValues_[i_]));
+				return static_cast<float>(rValues_[i_]);
+			};
+			if(hasSource)
+			{
+				std::vector<glm::vec2> srcSet(count);
+				for(size_t i = 0; i < count; i++) srcSet[i] = glm::vec2(exact(rPrimitive.src, i, "SRC"), exact(rPrimitive.srcFlag, i, "SRCFLAG"));
+				attributes["TEXCOORD_1"] = addAccessor(srcSet.data(), count, 2, FloatType, ArrayTarget, "VEC2", Json());
 			}
-			else
+			if(hasOrig || !rPrimitive.srcIdx.empty())
 			{
-				auto exact = [&](const std::vector<uint32_t>& rValues_, size_t i_, const char* pName_) -> float
+				std::vector<glm::vec2> xySet(count), zIdxSet(count);
+				for(size_t i = 0; i < count; i++)
 				{
-					if(rValues_.empty()) return 0.0f;
-					if(rValues_[i_] > MaxExactFloat) fail(std::format("mesh {}: {} {} is past 2^24 - 1, too large for the TexCoord encoding.", m, pName_, rValues_[i_]));
-					return static_cast<float>(rValues_[i_]);
-				};
-				if(hasSource)
-				{
-					std::vector<glm::vec2> srcSet(count);
-					for(size_t i = 0; i < count; i++) srcSet[i] = glm::vec2(exact(rPrimitive.src, i, "SRC"), exact(rPrimitive.srcFlag, i, "SRCFLAG"));
-					attributes["TEXCOORD_1"] = addAccessor(srcSet.data(), count, 2, FloatType, ArrayTarget, "VEC2", Json());
+					glm::vec3 orig = hasOrig ? rPrimitive.orig[i] : glm::vec3(0.0f);
+					xySet[i] = glm::vec2(orig.x, orig.y);
+					zIdxSet[i] = glm::vec2(orig.z, exact(rPrimitive.srcIdx, i, "SRCIDX"));
 				}
-				if(hasOrig || !rPrimitive.srcIdx.empty())
-				{
-					std::vector<glm::vec2> xySet(count), zIdxSet(count);
-					for(size_t i = 0; i < count; i++)
-					{
-						glm::vec3 orig = hasOrig ? rPrimitive.orig[i] : glm::vec3(0.0f);
-						xySet[i] = glm::vec2(orig.x, orig.y);
-						zIdxSet[i] = glm::vec2(orig.z, exact(rPrimitive.srcIdx, i, "SRCIDX"));
-					}
-					attributes["TEXCOORD_2"] = addAccessor(xySet.data(), count, 2, FloatType, ArrayTarget, "VEC2", Json());
-					attributes["TEXCOORD_3"] = addAccessor(zIdxSet.data(), count, 2, FloatType, ArrayTarget, "VEC2", Json());
-				}
+				attributes["TEXCOORD_2"] = addAccessor(xySet.data(), count, 2, FloatType, ArrayTarget, "VEC2", Json());
+				attributes["TEXCOORD_3"] = addAccessor(zIdxSet.data(), count, 2, FloatType, ArrayTarget, "VEC2", Json());
 			}
 
 			Json primitive = {{"attributes", attributes}, {"mode", 4}};

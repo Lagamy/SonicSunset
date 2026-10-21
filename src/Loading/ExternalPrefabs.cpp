@@ -1,4 +1,5 @@
 #include "ExternalPrefabs.h"
+#include "Paths.h"
 #include "Prefab.h"
 #include "Globals.h"
 #include "API.h"
@@ -41,8 +42,8 @@ std::vector<std::string>& foldersOf(ExternalScope scope_, const std::string& lev
 /* The scope's file under a root: the game's copy ("Assets/...") and the source tree's (what the next build copies back). */
 fs::path fileOf(ExternalScope scope_, bool inSource_, const std::string& levelName_)
 {
-	if(scope_ == ExternalScope::Project) return (inSource_ ? fs::path(SF_SOURCE_DIR) / "External" : fs::path("Assets/External")) / "Prefabs" / "Global" / "prefabs.json";
-	return (inSource_ ? fs::path(SF_SOURCE_DIR) / "Levels" : fs::path("Assets/Levels")) / levelName_ / "prefabs.json";
+	if(scope_ == ExternalScope::Project) return (inSource_ ? fs::path(Paths::SourceDir) / "External" : fs::path(Paths::ExternalDir)) / "Prefabs" / "Global" / "prefabs.json";
+	return (inSource_ ? fs::path(Paths::SourceDir) / "Levels" : fs::path(Paths::LevelsDir)) / levelName_ / "prefabs.json";
 }
 
 /* A name that becomes a prefab's name or a folder's: letters, digits, '_', '-' and ' ' (a '/' would be a path). */

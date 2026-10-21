@@ -1,7 +1,7 @@
 #include "LevelLoader.h"
-#include "ResourceKeys.h"
-#include "SAKeys.h"
-#include "STH2005Keys.h"
+#include "Paths.h"
+#include "LevelRecipe.h"
+#include "GameLevelLoader.h"
 #include "Level.h"
 #include "API.h"
 #include "Globals.h"
@@ -33,94 +33,8 @@ namespace
 {
 using Json = nlohmann::json;
 
-/*
-The generated tables a level file can name (see the "entityTable" and "typeNames" fields in docs/ENGINE_USAGE.md). A new generated
-table is one line here.
-*/
-const std::map<std::string, const std::vector<SAPlacedEntityKey>*> saEntityTables{
-	{"SAEntityTable_EmeraldCoast", &SAEntityTable_EmeraldCoast}
-};
-
-/* Objects a stage's own code creates (no SET record): their keys, so they are prefabs; the level file's "source" says where they stand. */
-const std::vector<const SAEntityKey*> saStageCreated{
-	&EmeraldCoastBridgeDockForward, &EmeraldCoastBridgeDockBackward, &EmeraldCoastBridgePier, &EmeraldCoastBridgeLinks
-};
-const std::map<std::string, const std::map<uint16_t, const char*>*> typeNameMaps{
-	{"SAObjectTypeNames_EmeraldCoast", &SAObjectTypeNames_EmeraldCoast},
-	{"ObjectTypeNames", &ObjectTypeNames}
-};
-const std::map<std::string, const std::vector<STH2005::PlacedEntityKey>*> oneEntityTables{
-	{"EntityTable_stg0100", &EntityTable_stg0100}
-};
-
-/* The keys of a level made from its file. The keys hold const char* and the instances keep pointers to them, so the strings live here and a record is never freed or moved (std::map nodes, std::deque). */
-struct Recipe
-{
-	std::deque<std::string> strings;
-	std::unique_ptr<SALandTableKey> saLandTable;
-	std::unique_ptr<SATextureSetKey> saTextures;
-	std::unique_ptr<STH2005::LevelKey> oneLevel;
-	std::unique_ptr<GLTFLevelKey> gltfLevel;
-	/* The level file's "skippedTextures" (sadx) or "skippedEntries" (sth2005): our choice of what not to load, not part of the disc keys. */
-	std::vector<std::string> skipped;
-	glm::vec3 position{0.0f};
-	PoolId shaderId;
-};
+/* The recipe of each level loaded so far, by name: the keys the instances keep pointers into. */
 std::map<std::string, Recipe> recipes;
-
-const char* keepString(Recipe& rRecipe_, const std::string& value_)
-{
-	rRecipe_.strings.push_back(value_);
-	return rRecipe_.strings.back().c_str();
-}
-
-template<typename Table>
-const Table& findTable(const std::map<std::string, const Table*>& rTables_, const Json& rFile_, const char* field_)
-{
-	std::string name = rFile_.at(field_).get<std::string>();
-	auto found = rTables_.find(name);
-	if(found == rTables_.end()) throw std::runtime_error(std::format("'{}' is not a table LevelLoader.cpp knows ({}).", name, field_));
-	return *found->second;
-}
-
-std::vector<const char*> keepStrings(Recipe& rRecipe_, const Json& rFile_, const char* field_)
-{
-	std::vector<const char*> result;
-	if(!rFile_.contains(field_)) return result;
-	for(const Json& rValue : rFile_.at(field_)) result.push_back(keepString(rRecipe_, rValue.get<std::string>()));
-	return result;
-}
-
-/* A number, or a string in any base ("0x1B8D68"): offsets are written in hex, like everywhere in the docs. */
-uint32_t readOffset(const Json& rValue_)
-{
-	if(rValue_.is_string()) return static_cast<uint32_t>(std::stoul(rValue_.get<std::string>(), nullptr, 0));
-	return rValue_.get<uint32_t>();
-}
-
-void fillSA(Recipe& rRecipe_, const Json& rFile_)
-{
-	const Json& rLandTable = rFile_.at("landTable");
-	if(rFile_.contains("skippedTextures")) rRecipe_.skipped = rFile_.at("skippedTextures").get<std::vector<std::string>>();
-	rRecipe_.saLandTable = std::make_unique<SALandTableKey>(SALandTableKey{keepString(rRecipe_, rLandTable.at("rel").get<std::string>()), readOffset(rLandTable.at("offset")), keepStrings(rRecipe_, rFile_, "placementFiles")});
-	SALandTableKey& rKey = *rRecipe_.saLandTable;
-	if(rFile_.contains("entityTable")) rKey.entities = findTable(saEntityTables, rFile_, "entityTable");
-	if(rFile_.contains("typeNames")) rKey.typeNames = &findTable(typeNameMaps, rFile_, "typeNames");
-	rRecipe_.saTextures = std::make_unique<SATextureSetKey>(SATextureSetKey{keepString(rRecipe_, rFile_.at("textures").get<std::string>())});
-}
-
-void fillONE(Recipe& rRecipe_, const Json& rFile_)
-{
-	std::vector<STH2005::ArchiveKey> sections;
-	for(const Json& rSection : rFile_.at("sections")) sections.push_back(STH2005::ArchiveKey{keepString(rRecipe_, rSection.get<std::string>())});
-	const Json& rTextures = rFile_.at("textures");
-	STH2005::TextureKey textures{{keepString(rRecipe_, rTextures.at("archive").get<std::string>())}, keepString(rRecipe_, rTextures.at("txd").get<std::string>())};
-	if(rFile_.contains("skippedEntries")) rRecipe_.skipped = rFile_.at("skippedEntries").get<std::vector<std::string>>();
-	rRecipe_.oneLevel = std::make_unique<STH2005::LevelKey>(STH2005::LevelKey{sections, textures, keepStrings(rRecipe_, rFile_, "placementFiles")});
-	STH2005::LevelKey& rKey = *rRecipe_.oneLevel;
-	if(rFile_.contains("entityTable")) rKey.entities = findTable(oneEntityTables, rFile_, "entityTable");
-	if(rFile_.contains("typeNames")) rKey.typeNames = &findTable(typeNameMaps, rFile_, "typeNames");
-}
 
 /* The level's visual is every chunk in its folder; "collisions" names the collision files (Collision/<name>.collision.json) that make up its collision. */
 void fillGLTF(Recipe& rRecipe_, const Json& rFile_, const std::string& rName_)
@@ -139,7 +53,7 @@ std::string levelFilePath(const std::string& root_, const std::string& name_)
 /* Reads Assets/Levels/<name>/<name>.json into the recipe of the name, once. */
 void readRecipe(const std::string& name_, Recipe& rRecipe_)
 {
-	std::string path = levelFilePath("Assets/Levels/", name_);
+	std::string path = levelFilePath(Paths::Levels, name_);
 	std::ifstream stream(path);
 	if(!stream) throw std::runtime_error(std::format("unknown level '{}' ({} not found).", name_, path));
 	Json file = Json::parse(stream);
@@ -151,10 +65,8 @@ void readRecipe(const std::string& name_, Recipe& rRecipe_)
 		if(position.size() != 3) throw std::runtime_error("position needs 3 numbers.");
 		rRecipe_.position = glm::vec3(position[0], position[1], position[2]);
 	}
-	if(engine == "sadx") fillSA(rRecipe_, file);
-	else if(engine == "sth2005") fillONE(rRecipe_, file);
-	else if(engine == "gltf") fillGLTF(rRecipe_, file, name_);
-	else throw std::runtime_error(std::format("unknown engine '{}' (\"sadx\", \"sth2005\" or \"gltf\").", engine));
+	if(engine == "gltf") fillGLTF(rRecipe_, file, name_);
+	else if(!readGameRecipe(engine, rRecipe_, file)) throw std::runtime_error(std::format("unknown engine '{}' (\"gltf\" or one of the game's).", engine));
 }
 }
 
@@ -265,6 +177,12 @@ nlohmann::ordered_json writeShape(const Physics::CollisionShape& rShape_, const 
 	json["angle"] = nlohmann::ordered_json::array({rShape_.angle.x, rShape_.angle.y, rShape_.angle.z});
 	if(rShape_.behavior == UninitializedPoolId) json["behavior"] = nullptr;
 	else json["behavior"] = Globals::Game::behaviors.names[rShape_.behavior.id];
+	if(!rShape_.tags.empty())
+	{
+		nlohmann::ordered_json tags = nlohmann::ordered_json::array();
+		for(PoolId tag : rShape_.tags) tags.push_back(Globals::Game::baTags.names[tag.id]);
+		json["tags"] = tags;
+	}
 	nlohmann::ordered_json values = nlohmann::ordered_json::object();
 	for(const ExternalField& rField : Globals::Game::baBehaviors.fieldsOf(rShape_.behavior))
 	{
@@ -365,6 +283,15 @@ Physics::CollisionShape readShape(const Json& rJson_, const std::string& rLevel_
 		auto found = Globals::Game::behaviors.nameToId.find(name);
 		if(found == Globals::Game::behaviors.nameToId.end()) fprintf(stderr, "Level '%s': an edit names the unknown collision behaviour '%s'.\n", rLevel_.c_str(), name.c_str());
 		else shape.behavior = found->second;
+	}
+	if(rJson_.contains("tags"))
+	{
+		for(const nlohmann::json& rTag : rJson_.at("tags"))
+		{
+			PoolId tag = Globals::Game::baBehaviors.findTag(rTag.get<std::string>().c_str());
+			if(tag == UninitializedPoolId) fprintf(stderr, "Level '%s': an edit names the unknown collision tag '%s'.\n", rLevel_.c_str(), rTag.get<std::string>().c_str());
+			else shape.tags.push_back(tag);
+		}
 	}
 	if(rJson_.contains("values"))
 	{
@@ -872,7 +799,7 @@ void removeSourceEntities(Level& rLevel_, const Json& rRemoved_)
 void applyEdits(Level& rLevel_, const std::string& name_, PoolId shaderId_)
 {
 	Json file;
-	std::ifstream stream(levelFilePath("Assets/Levels/", name_));
+	std::ifstream stream(levelFilePath(Paths::Levels, name_));
 	if(stream) file = Json::parse(stream);
 	if(file.contains("source")) applyEditSet(rLevel_, file.at("source"), name_, shaderId_, true);
 	rLevel_.markSourceEntities();
@@ -899,16 +826,7 @@ void buildLevel(PoolId id_, const std::string& name_, Recipe& rRecipe_, bool kee
 #endif
 	/* The entities are made from the game's data and the level's Source Game Level prefab sets alone (Level::sourceBehaviors); the file's prefab edits are applied after them (applyEdits). The level's own sets start empty: its slot's were dropped when the level before it was destroyed. */
 	loadSourcePrefabs(name_, id_);
-	if(rRecipe_.saLandTable != nullptr)
-	{
-		if(!keepInstance_)
-		{
-			rLevel.setSAGPUInstance(rRecipe_.shaderId, *rRecipe_.saLandTable, *rRecipe_.saTextures, rRecipe_.skipped);
-			rLevel.setSACollision(*rRecipe_.saLandTable);
-		}
-		rLevel.setSAEntities(rRecipe_.shaderId, *rRecipe_.saLandTable);
-	}
-	else if(rRecipe_.gltfLevel != nullptr)
+	if(rRecipe_.gltfLevel != nullptr)
 	{
 		if(!keepInstance_)
 		{
@@ -916,15 +834,7 @@ void buildLevel(PoolId id_, const std::string& name_, Recipe& rRecipe_, bool kee
 			rLevel.setGLTFCollision(*rRecipe_.gltfLevel);
 		}
 	}
-	else
-	{
-		if(!keepInstance_)
-		{
-			rLevel.setONEGPUInstance(rRecipe_.shaderId, *rRecipe_.oneLevel, rRecipe_.skipped);
-			rLevel.setONECollision(*rRecipe_.oneLevel);
-		}
-		rLevel.setONEEntities(rRecipe_.shaderId, *rRecipe_.oneLevel);
-	}
+	else buildGameLevel(rLevel, rRecipe_, keepInstance_);
 	applyEdits(rLevel, name_, rRecipe_.shaderId);
 
 	/* The level was made and edited in its own coordinates; the HubWorld's place for it (HubWorld.json) moves all of it, so its file's edits stay local (saveLevelEdits writes them back unmoved). */
@@ -1059,7 +969,7 @@ static void buildHubWorldEntities()
 			params.rotation = glm::mat4(rEntry.rotation);
 			params.name = rEntry.name;
 			params.what = "(HubWorld)";
-			id = spawnPrefab(found->second, Graphics::shaders.nameToId.at(Globals::Game::prefabs[found->second].game == SA_NINJA ? "SA" : "STH2005"), params);
+			id = spawnPrefab(found->second, Graphics::shaders.nameToId.at(gameShaderName(Globals::Game::prefabs[found->second].game)), params);
 			if(id == UninitializedPoolId)
 			{
 				fprintf(stderr, "HubWorld: entity '%s' of '%s' could not be made\n", rEntry.name.c_str(), rEntry.prefab.c_str());
@@ -1263,7 +1173,7 @@ bool resetEntitiesInPlace(PoolId levelId_, const std::string& name_, uint32_t& r
 	rLevel.entityIds.resize(rLevel.builtCount);
 
 	Json file;
-	std::ifstream stream(levelFilePath("Assets/Levels/", name_));
+	std::ifstream stream(levelFilePath(Paths::Levels, name_));
 	if(stream) file = Json::parse(stream);
 
 	/* First every entity is made, so the entity references of the file's edits (applied next) name the new ones. */
@@ -1289,8 +1199,7 @@ bool resetEntitiesInPlace(PoolId levelId_, const std::string& name_, uint32_t& r
 		if(rRecipe.kind == EntityRecipe::Kind::Placed)
 		{
 			SpawnParams params = rRecipe.params;
-			params.pPlacement = rRecipe.placement.get();
-			params.pONECollisions = rRecipe.hasOneCollisions ? &rRecipe.oneCollisions : nullptr;
+			restoreGameSpawnParams(params, rRecipe);
 			id = spawnPrefab(rRecipe.prefabId, rRecipe.shaderId, params);
 		}
 		else if(rRecipe.kind == EntityRecipe::Kind::Camera)
@@ -1434,7 +1343,7 @@ void loadSourcePrefabs(const std::string& levelName_, PoolId levelId_)
 		PrefabEdits& rSource = Globals::Game::prefabs.objects[i].inLevels[levelId_.id].source;
 		rSource = PrefabEdits{};
 		const std::string& rName = Globals::Game::prefabs.names[i];
-		std::string path = sourcePrefabFile("Assets/Levels/", levelName_, rName);
+		std::string path = sourcePrefabFile(Paths::Levels, levelName_, rName);
 		std::ifstream stream(path);
 		if(!stream) continue;
 		try
@@ -1448,23 +1357,6 @@ void loadSourcePrefabs(const std::string& levelName_, PoolId levelId_)
 	}
 }
 
-void forEachSAEntityKey(const std::function<void(const SAEntityKey&)>& rFunction_)
-{
-	for(const auto& [tableName, pTable] : saEntityTables)
-	{
-		for(const SAPlacedEntityKey& rPlaced : *pTable) rFunction_(rPlaced.entity);
-	}
-	for(const SAEntityKey* pKey : saStageCreated) rFunction_(*pKey);
-}
-
-void forEachONEEntityKey(const std::function<void(const STH2005::EntityKey&)>& rFunction_)
-{
-	for(const auto& [tableName, pTable] : oneEntityTables)
-	{
-		for(const STH2005::PlacedEntityKey& rPlaced : *pTable) rFunction_(rPlaced.entity);
-	}
-}
-
 namespace
 {
 /* A prefab's Changed file under a root ("Assets/External/": the game's copy; the source tree's External/: what the next build copies back), by its pool name ("SADX/SPRING"; a key name has no character a path can't have). */
@@ -1474,116 +1366,13 @@ std::string changedPrefabFile(const std::string& rRoot_, const std::string& rPoo
 }
 }
 
-namespace
-{
-PrefabGroup readGroup(const std::string& rName_)
-{
-	for(PrefabGroup group : {PrefabGroup::Enemies, PrefabGroup::Npcs, PrefabGroup::Characters, PrefabGroup::StaticObjects, PrefabGroup::InteractibleObjects})
-	{
-		if(rName_ == prefabGroupFolder(group)) return group;
-	}
-	throw std::runtime_error(std::format("'{}' is not a prefab group.", rName_));
-}
-
-/* The group a key name goes in for one game of Groups.json: the first prefix that starts it, else the list that names it, else StaticObjects. */
-PrefabGroup groupOf(const Json& rGame_, const std::string& rName_)
-{
-	for(const auto& [prefix, group] : rGame_.at("prefixes").items())
-	{
-		if(rName_.starts_with(prefix)) return readGroup(group.get<std::string>());
-	}
-	for(const auto& [group, names] : rGame_.at("names").items())
-	{
-		for(const Json& rName : names)
-		{
-			if(rName.get<std::string>() == rName_) return readGroup(group);
-		}
-	}
-	return PrefabGroup::StaticObjects;
-}
-
-PlacementLayout readLayout(const std::string& rName_)
-{
-	if(rName_ == "Single") return PlacementLayout::Single;
-	if(rName_ == "RingLine") return PlacementLayout::RingLine;
-	if(rName_ == "Variant") return PlacementLayout::Variant;
-	throw std::runtime_error(std::format("'{}' is not a placement layout.", rName_));
-}
-}
-
-void loadPrefabData()
-{
-	auto& rPrefabs = Globals::Game::prefabs;
-	try
-	{
-		std::ifstream stream("Assets/External/Prefabs/Groups.json");
-		if(!stream) throw std::runtime_error("the file is missing");
-		Json groups = Json::parse(stream);
-		for(uint32_t i = 0; i < rPrefabs.objects.size(); i++)
-		{
-			if(!rPrefabs.alive[i]) continue;
-			Prefab& rPrefab = rPrefabs.objects[i];
-			if(rPrefab.kind != PrefabKind::SAObject && rPrefab.kind != PrefabKind::ONEObject) continue;
-			rPrefab.group = groupOf(groups.at(prefabGameName(rPrefab.game)), rPrefab.name);
-		}
-	}
-	catch(const std::exception& rError)
-	{
-		fprintf(stderr, "Prefab groups not read (Assets/External/Prefabs/Groups.json): %s\n", rError.what());
-	}
-	try
-	{
-		std::ifstream stream("Assets/External/Prefabs/STH2005/Placement.json");
-		if(!stream) throw std::runtime_error("the file is missing");
-		Json placement = Json::parse(stream);
-		for(uint32_t i = 0; i < rPrefabs.objects.size(); i++)
-		{
-			if(!rPrefabs.alive[i] || rPrefabs.objects[i].kind != PrefabKind::ONEObject) continue;
-			Prefab& rPrefab = rPrefabs.objects[i];
-			auto found = placement.find(rPrefab.name);
-			if(found == placement.end()) continue;
-			rPrefab.layout = readLayout(found->value("layout", std::string("Single")));
-			rPrefab.variants = found->value("variants", std::vector<std::vector<uint32_t>>{});
-			rPrefab.loopMotion = found->value("loopMotion", false);
-		}
-	}
-	catch(const std::exception& rError)
-	{
-		fprintf(stderr, "Prefab placement data not read (Assets/External/Prefabs/STH2005/Placement.json): %s\n", rError.what());
-	}
-	try
-	{
-		std::ifstream stream("Assets/External/Prefabs/SADX/Placement.json");
-		if(!stream) throw std::runtime_error("the file is missing");
-		Json placement = Json::parse(stream);
-		for(uint32_t i = 0; i < rPrefabs.objects.size(); i++)
-		{
-			if(!rPrefabs.alive[i] || rPrefabs.objects[i].kind != PrefabKind::SAObject) continue;
-			Prefab& rPrefab = rPrefabs.objects[i];
-			auto found = placement.find(rPrefab.saKey->name);
-			if(found == placement.end()) continue;
-			for(const Json& rStep : found->value("rotation", Json::array()))
-			{
-				std::string axis = rStep.at("axis").get<std::string>();
-				if(axis.size() != 1 || axis.find_first_of("XYZ") != 0) throw std::runtime_error(std::format("{}: '{}' is not an axis.", rPrefab.name, axis));
-				rPrefab.rotation.push_back(SARotationStep{axis[0], rStep.at("field").get<uint8_t>(), rStep.at("addend").get<int32_t>(), rStep.at("negate").get<bool>()});
-			}
-			rPrefab.variantField = found->value("variantField", 0);
-		}
-	}
-	catch(const std::exception& rError)
-	{
-		fprintf(stderr, "SADX prefab placement data not read (Assets/External/Prefabs/SADX/Placement.json): %s\n", rError.what());
-	}
-}
-
 void loadChangedPrefabs()
 {
 	for(uint32_t i = 0; i < Globals::Game::prefabs.objects.size(); i++)
 	{
 		if(!Globals::Game::prefabs.alive[i] || Globals::Game::prefabs.objects[i].kind == PrefabKind::External) continue;
 		const std::string& rName = Globals::Game::prefabs.names[i];
-		std::string path = changedPrefabFile("Assets/External/", rName);
+		std::string path = changedPrefabFile(Paths::External, rName);
 		std::ifstream stream(path);
 		if(!stream) continue;
 		try
@@ -1605,7 +1394,7 @@ void saveChangedPrefab(PoolId prefabId_)
 	const std::string& rName = Globals::Game::prefabs.names[prefabId_.id];
 	bool empty = prefabEditsEmpty(rPrefab.changed, true);
 	std::string text = empty ? std::string() : writePrefabEdits(rPrefab.changed, true).dump(2);
-	for(const std::string& rRoot : {std::string("Assets/External/"), std::string(SF_SOURCE_DIR "/External/")})
+	for(const std::string& rRoot : {std::string(Paths::External), std::string(Paths::SourceExternal)})
 	{
 		fs::path path = changedPrefabFile(rRoot, rName);
 		if(empty)
@@ -1792,8 +1581,8 @@ bool saveLevelEdits(PoolId levelId_, const std::string& fileName_)
 {
 	const Level& rLevel = getLevel(levelId_);
 	std::string levelName = Globals::Game::levels.names[levelId_.id];
-	std::ifstream stream(levelFilePath("Assets/Levels/", levelName));
-	if(!stream) throw std::runtime_error(std::format("{} not found.", levelFilePath("Assets/Levels/", levelName)));
+	std::ifstream stream(levelFilePath(Paths::Levels, levelName));
+	if(!stream) throw std::runtime_error(std::format("{} not found.", levelFilePath(Paths::Levels, levelName)));
 
 	/* ordered_json keeps the file's key order, so a save only changes the edits. */
 	nlohmann::ordered_json file = nlohmann::ordered_json::parse(stream);
@@ -1818,7 +1607,7 @@ bool saveLevelEdits(PoolId levelId_, const std::string& fileName_)
 	*/
 	std::string text = file.dump(2);
 	bool written = false;
-	for(const std::string& rRoot : {std::string("Assets/Levels/"), std::string(SF_SOURCE_DIR "/Levels/")})
+	for(const std::string& rRoot : {std::string(Paths::Levels), std::string(Paths::SourceLevels)})
 	{
 		namespace fs = std::filesystem;
 
@@ -1923,8 +1712,8 @@ void saveSourceLevel(PoolId levelId_)
 	namespace fs = std::filesystem;
 	const Level& rLevel = getLevel(levelId_);
 	std::string levelName = Globals::Game::levels.names[levelId_.id];
-	std::ifstream stream(levelFilePath("Assets/Levels/", levelName));
-	if(!stream) throw std::runtime_error(std::format("{} not found.", levelFilePath("Assets/Levels/", levelName)));
+	std::ifstream stream(levelFilePath(Paths::Levels, levelName));
+	if(!stream) throw std::runtime_error(std::format("{} not found.", levelFilePath(Paths::Levels, levelName)));
 	nlohmann::ordered_json file = nlohmann::ordered_json::parse(stream);
 	stream.close();
 
@@ -1947,7 +1736,7 @@ void saveSourceLevel(PoolId levelId_)
 	std::string text = file.dump(2);
 
 	/* The prefabs' edits go to the level's SourceGamePrefabs folder, one file per prefab (removed when the prefab has none). */
-	for(const std::string& rRoot : {std::string("Assets/Levels/"), std::string(SF_SOURCE_DIR "/Levels/")})
+	for(const std::string& rRoot : {std::string(Paths::Levels), std::string(Paths::SourceLevels)})
 	{
 		for(uint32_t i = 0; i < Globals::Game::prefabs.objects.size(); i++)
 		{
@@ -1972,8 +1761,6 @@ void saveSourceLevel(PoolId levelId_)
 	}
 }
 
-namespace
-{
 /* The items of a comma separated list, trimmed of spaces; empty items are dropped. */
 std::vector<std::string> splitList(const std::string& text_)
 {
@@ -1991,7 +1778,6 @@ std::vector<std::string> splitList(const std::string& text_)
 	}
 	return result;
 }
-}
 
 void createLevelFile(const NewLevelFile& rLevel_)
 {
@@ -2000,7 +1786,7 @@ void createLevelFile(const NewLevelFile& rLevel_)
 	{
 		if(!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-') throw std::runtime_error("a level name can only have letters, digits, '_' and '-'.");
 	}
-	const std::string folders[] = {"Assets/Levels/", std::string(SF_SOURCE_DIR "/Levels/")};
+	const std::string folders[] = {Paths::Levels, std::string(Paths::SourceLevels)};
 	for(const std::string& rFolder : folders)
 	{
 		if(std::ifstream(levelFilePath(rFolder, rLevel_.name))) throw std::runtime_error(std::format("{} already exists.", levelFilePath(rFolder, rLevel_.name)));
@@ -2010,20 +1796,7 @@ void createLevelFile(const NewLevelFile& rLevel_)
 	file["engine"] = rLevel_.engine;
 	file["shader"] = rLevel_.shader;
 	file["position"] = nlohmann::ordered_json::array({0, 0, 0});
-	if(rLevel_.engine == "sadx")
-	{
-		if(rLevel_.landTableRel.empty() || rLevel_.landTableOffset.empty() || rLevel_.textures.empty()) throw std::runtime_error("an sadx level needs the land table's module and offset and the textures.");
-		file["landTable"] = {{"rel", rLevel_.landTableRel}, {"offset", rLevel_.landTableOffset}};
-		file["textures"] = rLevel_.textures;
-	}
-	else if(rLevel_.engine == "sth2005")
-	{
-		std::vector<std::string> sections = splitList(rLevel_.sections);
-		if(sections.empty() || rLevel_.textures.empty() || rLevel_.txd.empty()) throw std::runtime_error("an sth2005 level needs sections and the texture archive with its txd.");
-		file["sections"] = sections;
-		file["textures"] = {{"archive", rLevel_.textures}, {"txd", rLevel_.txd}};
-	}
-	else if(rLevel_.engine == "gltf")
+	if(rLevel_.engine == "gltf")
 	{
 		/* The glTF files are read now, once: the chunks and collision files are written to the level's folder (GLTFImport.h) and the level file only names the collision files. */
 		if(rLevel_.model.empty()) throw std::runtime_error("a gltf level needs the model file.");
@@ -2032,13 +1805,7 @@ void createLevelFile(const NewLevelFile& rLevel_)
 		for(const std::string& rPath : splitList(rLevel_.collisions)) collisions.push_back(importGLTFLevelCollision(rLevel_.name, rPath));
 		file["collisions"] = collisions;
 	}
-	else throw std::runtime_error(std::format("unknown engine '{}' (\"sadx\", \"sth2005\" or \"gltf\").", rLevel_.engine));
-
-	/* The placement files, entity table and type names are disc formats: a gltf level has none of them. */
-	std::vector<std::string> placementFiles = splitList(rLevel_.placementFiles);
-	if(rLevel_.engine != "gltf" && !placementFiles.empty()) file["placementFiles"] = placementFiles;
-	if(rLevel_.engine != "gltf" && !rLevel_.entityTable.empty()) file["entityTable"] = rLevel_.entityTable;
-	if(rLevel_.engine != "gltf" && !rLevel_.typeNames.empty()) file["typeNames"] = rLevel_.typeNames;
+	else if(!writeGameLevelFile(rLevel_, file)) throw std::runtime_error(std::format("unknown engine '{}' (\"gltf\" or one of the game's).", rLevel_.engine));
 
 	std::string text = file.dump(2);
 	for(const std::string& rFolder : folders)
@@ -2064,7 +1831,7 @@ Recipe& gltfRecipeOf(PoolId levelId_)
 void writeCollisionList(Recipe& rRecipe_, const std::vector<std::string>& rNames_)
 {
 	const std::string& rName = rRecipe_.gltfLevel->levelName;
-	for(const std::string& rFolder : {std::string("Assets/Levels/"), std::string(SF_SOURCE_DIR "/Levels/")})
+	for(const std::string& rFolder : {std::string(Paths::Levels), std::string(Paths::SourceLevels)})
 	{
 		std::ifstream stream(levelFilePath(rFolder, rName));
 		if(!stream) throw std::runtime_error(std::format("{} not found.", levelFilePath(rFolder, rName)));

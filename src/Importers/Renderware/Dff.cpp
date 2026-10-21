@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <format>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -326,6 +327,9 @@ static DffGeometry readGeometry(const std::vector<uint8_t>& rBytes_, const Chunk
 			continue;
 		}
 		rSubmesh.mesh.verticies = vertices;
+		rSubmesh.mesh.sourceMesh = static_cast<uint32_t>(m);
+		rSubmesh.mesh.sourceVertex.resize(vertices.size());
+		std::iota(rSubmesh.mesh.sourceVertex.begin(), rSubmesh.mesh.sourceVertex.end(), 0u);
 		for(Graphics::Vertex& rVertex : rSubmesh.mesh.verticies)
 		{
 			rVertex.color *= materials[m].color;

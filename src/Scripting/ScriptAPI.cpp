@@ -3,14 +3,10 @@
 #include "API.h"
 #include "Globals.h"
 #include "BABehaviors.h"
-#include "ResourceKeys.h"
 #include "LevelLoader.h"
-#include "PlayerLoader.h"
 #include "EntityBehavior.h"
 #include "GPU_Globals.h"
 #include "GPU_API.h"
-#include "ONEInstance.h"
-#include "DebugSetup.h"
 #include "Editor.h"
 #include "lua.h"
 #include "lauxlib.h"
@@ -39,7 +35,7 @@ error if the handle is of an entity that is gone. Vectors are three numbers (x, 
 */
 namespace Scripting
 {
-static PoolId checkEntity(lua_State* pLua_, int arg_)
+PoolId checkEntity(lua_State* pLua_, int arg_)
 {
 	lua_Integer handle = luaL_checkinteger(pLua_, arg_);
 	PoolId id = currentEntity(fromHandle(handle));
@@ -55,7 +51,7 @@ static Physics::PhysicsBody& checkBody(lua_State* pLua_, int arg_)
 	return Globals::Physics::bodies[rEntity.physicsId];
 }
 
-static int pushVector(lua_State* pLua_, const glm::vec3& rVector_)
+int pushVector(lua_State* pLua_, const glm::vec3& rVector_)
 {
 	lua_pushnumber(pLua_, rVector_.x);
 	lua_pushnumber(pLua_, rVector_.y);
@@ -63,23 +59,9 @@ static int pushVector(lua_State* pLua_, const glm::vec3& rVector_)
 	return 3;
 }
 
-static glm::vec3 checkVector(lua_State* pLua_, int firstArg_)
+glm::vec3 checkVector(lua_State* pLua_, int firstArg_)
 {
 	return glm::vec3(static_cast<float>(luaL_checknumber(pLua_, firstArg_)), static_cast<float>(luaL_checknumber(pLua_, firstArg_ + 1)), static_cast<float>(luaL_checknumber(pLua_, firstArg_ + 2)));
-}
-
-/* A C++ exception of the engine (a std::runtime_error from a pool or a loader) becomes a Lua error with its message instead of a crash. */
-template<int (*Function)(lua_State*)>
-static int guarded(lua_State* pLua_)
-{
-	try
-	{
-		return Function(pLua_);
-	}
-	catch(const std::exception& rError)
-	{
-		return luaL_error(pLua_, "%s", rError.what());
-	}
 }
 
 /* ---- time and game ---- */
@@ -126,156 +108,6 @@ static int key(lua_State* pLua_)
 	else return luaL_error(pLua_, "unknown key '%s'", name.c_str());
 	lua_pushboolean(pLua_, glfwGetKey(Globals::App::window, code) == GLFW_PRESS);
 	return 1;
-}
-
-/*
-The motions an entity can be made to play by name: Sonic's (an SA entity: its motion and the model it is made for) and Shadow's (an STH2005 entity: its motion and whether it loops; Sonic's entries loop unless the file says "loop": false). Both tables are read from
-Assets/External/Players/Sonic.json and Shadow.json (Loading::loadPlayerKeys). animate picks the Shadow table for an entity of the STH2005_ONE engine.
-Harmless to call every tick: the entity plays a motion when it differs from the one playing.
-*/
-using Animation = Loading::SonicAnimation;
-using ShadowAnimation = Loading::ShadowAnimation;
-
-static const std::unordered_map<std::string, Animation>& animationTable()
-{
-	return Loading::sonicKeys().animations;
-}
-
-static const std::unordered_map<std::string, ShadowAnimation>& shadowAnimationTable()
-{
-	return Loading::shadowKeys().animations;
-}
-
-static int animate(lua_State* pLua_)
-{
-	const auto& animations = animationTable();
-	PoolId id = checkEntity(pLua_, 1);
-	std::string name = luaL_checkstring(pLua_, 2);
-	if(Globals::Game::entities[id].sourceEngine == STH2005_ONE)
-	{
-		const auto& shadowAnimations = shadowAnimationTable();
-		auto shadowFound = shadowAnimations.find(name);
-		if(shadowFound == shadowAnimations.end()) return luaL_error(pLua_, "unknown animation '%s'", name.c_str());
-		changeAnimation(id, *shadowFound->second.pMotion, shadowFound->second.loop);
-		/* The optional third argument is the playback speed as a multiple of the 60 frames a second a motion plays at (0 or none = 1). */
-		Globals::Game::entities[id].animationRate = static_cast<float>(luaL_optnumber(pLua_, 3, 0.0));
-		return 0;
-	}
-	auto found = animations.find(name);
-	if(found == animations.end()) return luaL_error(pLua_, "unknown animation '%s'", name.c_str());
-	changeAnimation(id, *found->second.pMotion, *found->second.pMesh, found->second.loop);
-	/* The optional third argument is the playback speed in motion frames per game frame (the game's own unit: external, FUN_804cf4f4 adds speed times a table value each game frame); 0 or none = the default rate, negative = backwards (an SA motion: from its last frame). */
-	Globals::Game::entities[id].animationRate = static_cast<float>(luaL_optnumber(pLua_, 3, 0.0)) * Globals::Game::gameplaySystem.tickRate;
-	/* The optional fourth argument is the blend step of the motion table entry (external, FUN_804cf4f4: the share of the way from the old pose to the new motion's first frame added each game frame): over 0 and under 1 the motion change blends, 0, 1 or none = a cut. */
-	float blendStep = static_cast<float>(luaL_optnumber(pLua_, 4, 0.0));
-	Globals::Game::entities[id].animationBlendRate = blendStep > 0.0f && blendStep < 1.0f ? blendStep * Globals::Game::gameplaySystem.tickRate : 0.0f;
-	return 0;
-}
-
-/*
-pose(e, {{name, frame, weight}, ...}): a Shadow entity's main skeleton shows these motions (the names of the table above) sampled at those frames, mixed by weight (ONEInstance::setPose); an empty table ends it. The timing is the script's own.
-motionRange(e, name): the first and last frame the game plays that motion in (STH2005::Motion::start, end; most are 0 to the motion's length).
-*/
-static int pose(lua_State* pLua_)
-{
-	PoolId id = checkEntity(pLua_, 1);
-	luaL_checktype(pLua_, 2, LUA_TTABLE);
-	const auto& shadowAnimations = shadowAnimationTable();
-	std::vector<Graphics::PoseRequest> layers;
-	for(lua_Integer i = 1; lua_geti(pLua_, 2, i) != LUA_TNIL; i++)
-	{
-		lua_geti(pLua_, -1, 1);
-		std::string name = luaL_checkstring(pLua_, -1);
-		lua_geti(pLua_, -2, 2);
-		float frame = static_cast<float>(luaL_checknumber(pLua_, -1));
-		lua_geti(pLua_, -3, 3);
-		float weight = static_cast<float>(luaL_checknumber(pLua_, -1));
-		lua_pop(pLua_, 4);
-		auto found = shadowAnimations.find(name);
-		if(found == shadowAnimations.end()) return luaL_error(pLua_, "unknown animation '%s'", name.c_str());
-		layers.push_back(Graphics::PoseRequest{found->second.pMotion, frame, weight});
-	}
-	lua_pop(pLua_, 1);
-	Globals::Game::entities[id].setONEPose(layers);
-	return 0;
-}
-
-/* setAnimationScaleMode(n): Graphics::ONEScaleMode, a debug switch for what the motions' scale channels do (0 scale and compensation, 1 neither, 2 scale only). */
-static int setAnimationScaleMode(lua_State* pLua_)
-{
-	Graphics::ONEScaleMode = static_cast<int>(luaL_checkinteger(pLua_, 1));
-	return 0;
-}
-
-/* setAnimationEulerOrder(n): Graphics::ONEEulerOrder, a debug switch for the order the Euler angles of a motion are applied in (0 to 5). */
-static int setAnimationEulerOrder(lua_State* pLua_)
-{
-	Graphics::ONEEulerOrder = static_cast<int>(luaL_checkinteger(pLua_, 1));
-	return 0;
-}
-
-/*
-bone(e, name): for the debug log, a frame of a Shadow entity's skeleton as it was posed last: local translation x y z, local rotation as Euler angles in radians (Rz * Ry * Rx) x y z, scale x y z, and the position in the model's own space x y z (12 numbers);
-nothing if the skeleton has no frame of that name.
-*/
-static int bone(lua_State* pLua_)
-{
-	PoolId id = checkEntity(pLua_, 1);
-	std::string name = luaL_checkstring(pLua_, 2);
-	const Entity& rEntity = Globals::Game::entities[id];
-	if(rEntity.sourceEngine != STH2005_ONE || rEntity.instanceId == UninitializedPoolId) return luaL_error(pLua_, "entity %I has no ONE instance", toHandle(id));
-	float values[12];
-	if(!Graphics::getONEInstance(rEntity.instanceId).boneInfo(name, values)) return 0;
-	for(float value : values) lua_pushnumber(pLua_, value);
-	return 12;
-}
-
-/*
-lowestPoint(e): for the debug log, the lowest y of a Shadow entity's skinned vertices in the model's own space: as posed last, then in the rest pose (2 numbers; the sole against the model's origin).
-*/
-static int lowestPoint(lua_State* pLua_)
-{
-	PoolId id = checkEntity(pLua_, 1);
-	const Entity& rEntity = Globals::Game::entities[id];
-	if(rEntity.sourceEngine != STH2005_ONE || rEntity.instanceId == UninitializedPoolId) return luaL_error(pLua_, "entity %I has no ONE instance", toHandle(id));
-	float values[2];
-	Graphics::getONEInstance(rEntity.instanceId).lowestPoint(values);
-	lua_pushnumber(pLua_, values[0]);
-	lua_pushnumber(pLua_, values[1]);
-	return 2;
-}
-
-static int motionRange(lua_State* pLua_)
-{
-	PoolId id = checkEntity(pLua_, 1);
-	std::string name = luaL_checkstring(pLua_, 2);
-	const auto& shadowAnimations = shadowAnimationTable();
-	auto found = shadowAnimations.find(name);
-	if(found == shadowAnimations.end()) return luaL_error(pLua_, "unknown animation '%s'", name.c_str());
-	const Entity& rEntity = Globals::Game::entities[id];
-	if(rEntity.sourceEngine != STH2005_ONE || rEntity.instanceId == UninitializedPoolId) return luaL_error(pLua_, "entity %I has no ONE instance", toHandle(id));
-	const Graphics::ONEInstance& rInstance = Graphics::getONEInstance(rEntity.instanceId);
-	const STH2005::Motion& rMotion = Graphics::oneArchives[rInstance.archiveId].motions[Graphics::oneArchives[rInstance.archiveId].useMotion(*found->second.pMotion)];
-	lua_pushnumber(pLua_, rMotion.start);
-	lua_pushnumber(pLua_, rMotion.end != 0 ? rMotion.end : rMotion.lastFrame);
-	return 2;
-}
-
-/* blink(e, name): draws that animation in place of the one animate set while it is on, which keeps its own clock; blink(e, false) or nil ends it. */
-static int blink(lua_State* pLua_)
-{
-	PoolId id = checkEntity(pLua_, 1);
-	if(!lua_isstring(pLua_, 2))
-	{
-		blinkAnimation(id, nullptr, nullptr);
-		return 0;
-	}
-	const auto& animations = animationTable();
-	std::string name = lua_tostring(pLua_, 2);
-	auto found = animations.find(name);
-	if(found == animations.end()) return luaL_error(pLua_, "unknown animation '%s'", name.c_str());
-	blinkAnimation(id, found->second.pMotion, found->second.pMesh);
-	return 0;
 }
 
 static int cameraForward(lua_State* pLua_)
@@ -398,54 +230,6 @@ static int postEvent(lua_State* pLua_)
 	PoolId id = checkEntity(pLua_, 2);
 	glm::vec3 where = lua_gettop(pLua_) >= 5 ? checkVector(pLua_, 3) : Globals::Game::entities[id].position;
 	postGameEvent(pName, id, where);
-	return 0;
-}
-
-/* Starts (on) or lets go of (off, it then fades out) the entity's dash ribbon (Graphics::DashTrail); on again while it has one attached does nothing. */
-static int setDashTrail(lua_State* pLua_)
-{
-	Graphics::dashTrail.setActive(checkEntity(pLua_, 1), lua_toboolean(pLua_, 2) != 0);
-	return 0;
-}
-
-/* Starts (on) or ends (off) one of the entity's effect balls (Graphics::EffectBalls): kind is "jumpA", "dashB" or "fallB"; on again while it has that one does nothing. */
-static int setEffectBall(lua_State* pLua_)
-{
-	std::string kind = luaL_checkstring(pLua_, 2);
-	Graphics::EffectBalls::Kind ball;
-	if(kind == "jumpA") ball = Graphics::EffectBalls::JumpBallA;
-	else if(kind == "dashB") ball = Graphics::EffectBalls::DashBallB;
-	else if(kind == "fallB") ball = Graphics::EffectBalls::FallBallB;
-	else return luaL_error(pLua_, "sf.setEffectBall: unknown kind '%s' (jumpA, dashB or fallB).", kind.c_str());
-	Graphics::effectBalls.setActive(checkEntity(pLua_, 1), ball, lua_toboolean(pLua_, 3) != 0);
-	return 0;
-}
-
-/*
-Makes one sphere of SADX Sonic's homing burst ("burst", fixed where it is made), aura ("aura", follows the entity one tick behind; made every tick while rolling fast or homing) or spin dash charge ("charge", a flattened tilted ellipsoid
-at the entity's current position; made every tick while charging) at the entity's position plus (dx, dy, dz) (Graphics::DashSpheres).
-heading (radians, default 0) turns the aura's gradient along the character's heading; the charge is drawn in the frame of heading and the up direction (nx, ny, nz) (default 0, 1, 0).
-*/
-static int spawnDashSphere(lua_State* pLua_)
-{
-	std::string kind = luaL_checkstring(pLua_, 1);
-	Graphics::DashSpheres::Kind sphere;
-	if(kind == "burst") sphere = Graphics::DashSpheres::Burst;
-	else if(kind == "aura") sphere = Graphics::DashSpheres::Aura;
-	else if(kind == "charge") sphere = Graphics::DashSpheres::Charge;
-	else return luaL_error(pLua_, "sf.spawnDashSphere: unknown kind '%s' (burst, aura or charge).", kind.c_str());
-	float heading = static_cast<float>(luaL_optnumber(pLua_, 6, 0.0));
-	glm::vec3 up(static_cast<float>(luaL_optnumber(pLua_, 7, 0.0)), static_cast<float>(luaL_optnumber(pLua_, 8, 1.0)), static_cast<float>(luaL_optnumber(pLua_, 9, 0.0)));
-	Graphics::dashSpheres.spawn(checkEntity(pLua_, 2), sphere, checkVector(pLua_, 3), heading, up);
-	return 0;
-}
-
-/*
-Makes one trail segment of SADX Sonic's roll and homing flight (Graphics::SonicTrail): it starts at the entity's position plus (dx, dy, dz) now and ends at the same offset position on the next gameplay tick, lives 20 ticks.
-*/
-static int spawnDashTrail(lua_State* pLua_)
-{
-	Graphics::sonicTrail.spawn(checkEntity(pLua_, 1), checkVector(pLua_, 2));
 	return 0;
 }
 
@@ -870,7 +654,7 @@ static int setShapeBehavior(lua_State* pLua_)
 
 /* ---- setup ---- */
 
-static PoolId shaderByName(const char* name_)
+PoolId shaderByName(const char* name_)
 {
 	return Graphics::shaders.nameToId.at(name_);
 }
@@ -956,30 +740,11 @@ static int resetLevel(lua_State* pLua_)
 /* Every entity spawnPlayer and spawn made that still exists (Scripting::spawnedEntities). */
 static std::vector<PoolId> spawnedList;
 
-/* Makes a player entity from the character's prefab (spawnPrefab: model, idle motions, hand-made collision shape and physics of weight 1) and returns it; the script attaches it (attachPlayer). */
-static int spawnPlayer(lua_State* pLua_)
+int pushSpawned(lua_State* pLua_, PoolId id_)
 {
-	std::string character = luaL_checkstring(pLua_, 1);
-	SpawnParams params;
-	params.position = checkVector(pLua_, 2);
-	PoolId id;
-	if(character == "sonic")
-	{
-		params.name = "SASonic";
-		params.what = "(player)";
-		id = spawnPrefab(findPrefab(SA_NINJA, "Sonic"), shaderByName("SA"), params);
-	}
-	else if(character == "shadow")
-	{
-		params.name = "Shadow";
-		params.what = "(player)";
-		id = spawnPrefab(findPrefab(STH2005_ONE, "Shadow"), shaderByName("STH2005"), params);
-	}
-	else return luaL_error(pLua_, "unknown character '%s'", character.c_str());
-	if(id == UninitializedPoolId) return luaL_error(pLua_, "could not spawn '%s'", character.c_str());
 	std::erase_if(spawnedList, [](PoolId old_) { return !entityExists(old_); });
-	spawnedList.push_back(id);
-	lua_pushinteger(pLua_, toHandle(id));
+	spawnedList.push_back(id_);
+	lua_pushinteger(pLua_, toHandle(id_));
 	return 1;
 }
 
@@ -992,7 +757,7 @@ static int spawn(lua_State* pLua_)
 	SpawnParams params;
 	params.position = checkVector(pLua_, 2);
 	params.what = "(script)";
-	PoolId id = spawnPrefab(found->second, shaderByName(Globals::Game::prefabs[found->second].game == SA_NINJA ? "SA" : "STH2005"), params);
+	PoolId id = spawnPrefab(found->second, shaderByName(gameShaderName(Globals::Game::prefabs[found->second].game)), params);
 	if(id == UninitializedPoolId) return luaL_error(pLua_, "could not spawn '%s'", pName);
 	std::erase_if(spawnedList, [](PoolId old_) { return !entityExists(old_); });
 	spawnedList.push_back(id);
@@ -1062,21 +827,22 @@ void registerAPI(lua_State* pLua_)
 {
 	const luaL_Reg functions[] = {
 		{"tickRate", guarded<tickRate>}, {"tickTime", guarded<tickTime>}, {"rings", guarded<rings>}, {"setRings", guarded<setRings>},
-		{"debugMode", guarded<debugMode>}, {"key", guarded<key>}, {"cameraForward", guarded<cameraForward>}, {"followCamera", guarded<followCamera>}, {"animate", guarded<animate>}, {"blink", guarded<blink>}, {"pose", guarded<pose>}, {"setAnimationScaleMode", guarded<setAnimationScaleMode>}, {"setAnimationEulerOrder", guarded<setAnimationEulerOrder>}, {"motionRange", guarded<motionRange>}, {"bone", guarded<bone>}, {"lowestPoint", guarded<lowestPoint>},
+		{"debugMode", guarded<debugMode>}, {"key", guarded<key>}, {"cameraForward", guarded<cameraForward>}, {"followCamera", guarded<followCamera>},
 		{"exists", guarded<exists>}, {"name", guarded<name>}, {"position", guarded<position>}, {"setPosition", guarded<setPosition>},
 		{"moveTo", guarded<moveTo>}, {"turnY", guarded<turnY>}, {"orient", guarded<orient>}, {"setModelTransform", guarded<setModelTransform>}, {"destroy", guarded<destroy>}, {"state", guarded<state>}, {"axis", guarded<axis>},
-		{"setUncullable", guarded<setUncullable>}, {"postEvent", guarded<postEvent>}, {"setDashTrail", guarded<setDashTrail>}, {"setEffectBall", guarded<setEffectBall>}, {"spawnDashSphere", guarded<spawnDashSphere>}, {"spawnDashTrail", guarded<spawnDashTrail>},
+		{"setUncullable", guarded<setUncullable>}, {"postEvent", guarded<postEvent>},
 		{"hasBody", guarded<hasBody>}, {"velocity", guarded<velocity>}, {"setVelocity", guarded<setVelocity>}, {"grounded", guarded<grounded>}, {"setGroundSnap", guarded<setGroundSnap>}, {"setWeight", guarded<setWeight>}, {"setGroundSnapMode", guarded<setGroundSnapMode>}, {"setMeanVelocityMove", guarded<setMeanVelocityMove>}, {"setFaceContact", guarded<setFaceContact>},
 		{"groundNormal", guarded<groundNormal>}, {"groundSurface", guarded<groundSurface>}, {"groundGap", guarded<groundGap>}, {"touchingWall", guarded<touchingWall>}, {"wallNormal", guarded<wallNormal>},
 		{"behavior", guarded<behavior>}, {"give", guarded<give>}, {"prefabBehavior", guarded<prefabBehavior>},
 		{"onTouch", guarded<onTouch>}, {"tag", guarded<tag>}, {"collisionBehavior", guarded<collisionBehavior>}, {"setShapeBehavior", guarded<setShapeBehavior>},
-		{"loadLevel", guarded<loadLevel>}, {"loadHubWorld", guarded<loadHubWorld>}, {"unloadLevel", guarded<unloadLevel>}, {"levelExists", guarded<levelExists>}, {"levels", guarded<levels>}, {"levelName", guarded<levelName>}, {"resetLevel", guarded<resetLevel>}, {"spawnPlayer", guarded<spawnPlayer>}, {"spawn", guarded<spawn>}, {"setCamera", guarded<setCamera>},
+		{"loadLevel", guarded<loadLevel>}, {"loadHubWorld", guarded<loadHubWorld>}, {"unloadLevel", guarded<unloadLevel>}, {"levelExists", guarded<levelExists>}, {"levels", guarded<levels>}, {"levelName", guarded<levelName>}, {"resetLevel", guarded<resetLevel>}, {"spawn", guarded<spawn>}, {"setCamera", guarded<setCamera>},
 		{"include", guarded<include>}, {"rotateBamsZXY", guarded<rotateBamsZXY>},
 		{nullptr, nullptr}
 	};
 	luaL_newlib(pLua_, functions);
 	lua_pushinteger(pLua_, toHandle(UninitializedPoolId));
 	lua_setfield(pLua_, -2, "none");
+	registerGameAPI(pLua_);
 	lua_setglobal(pLua_, "sf");
 }
 }

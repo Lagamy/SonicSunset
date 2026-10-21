@@ -2,9 +2,7 @@
 #include "Entity.h"
 #include "Level.h"
 #include "Scripting.h"
-#include "ResourceKeys.h"
-#include "PlayerLoader.h"
-#include "DebugSetup.h"
+#include "GamePrefab.h"
 #include "ExternalAssets.h"
 #include "GPU_API.h"
 #ifdef EDITOR
@@ -19,7 +17,7 @@
 /* Adds the entity to the pool given (the game's by default). Only an entity of the game's pool goes into the spatial index; the editor's own pools (PrefabThumbnails) are never seen by the gameplay or the renderer's loops. */
 PoolId addEntity(const char* name_, glm::vec3 position_, PoolMap<Entity>* pPool_)
 {
-    PoolId id = pPool_->add(name_, Entity{SA_NINJA, UninitializedPoolId, position_});
+    PoolId id = pPool_->add(name_, Entity{DefaultSourceEngine, UninitializedPoolId, position_});
     (*pPool_)[id].selfId = id;
     (*pPool_)[id].previousPosition = position_;
     if(pPool_ == &Globals::Game::entities) Globals::Game::spatialIndex.addDynamic(id);
@@ -48,7 +46,7 @@ Entity& getEntityByName(const char* name_)
 
 PoolId addLevel(const char* name_, glm::vec3 position_)
 {
-    PoolId id = Globals::Game::levels.add(name_, Level{SA_NINJA, UninitializedPoolId, position_});
+    PoolId id = Globals::Game::levels.add(name_, Level{DefaultSourceEngine, UninitializedPoolId, position_});
     Globals::Game::levels[id].selfId = id;
     return id;
 }
@@ -96,36 +94,6 @@ PoolId addBehavior(const BABehaviorKey& rKey_, BABehavior behavior_)
 bool entityExists(PoolId entityId_)
 {
     return entityId_.id < Globals::Game::entities.alive.size() && Globals::Game::entities.alive[entityId_.id] && Globals::Game::entities.generation[entityId_.id] == entityId_.generation;
-}
-
-/*
-Sets the animation an entity wants (Entity::animationIntent): the graphics side switches to it once a frame, only if it is not already playing, so a behaviour can call this every tick. The key has to outlive the
-entity (the keys of ResourceKeys.h are static); the last call wins. The SA overload loops, as playSAMotion does.
-*/
-void changeAnimation(PoolId entityId_, const SAMotionKey& rKey_)
-{
-    Entity& rEntity = Globals::Game::entities[entityId_];
-    rEntity.animationIntent = AnimationIntent{&rKey_, nullptr, true};
-}
-
-/* The same with the mesh the motion is for: the entity draws that mesh from then on (the motion's node count has to match it); loop_ false = the motion plays once and holds its last frame. */
-void changeAnimation(PoolId entityId_, const SAMotionKey& rKey_, const SAModelKey& rMesh_, bool loop_)
-{
-    Entity& rEntity = Globals::Game::entities[entityId_];
-    rEntity.animationIntent = AnimationIntent{&rKey_, nullptr, loop_, &rMesh_};
-}
-
-/* An SA entity draws this motion and mesh in place of the wanted animation while it is set (nullptr clears it); the wanted one keeps its own clock meanwhile (Entity::blinkIntent). */
-void blinkAnimation(PoolId entityId_, const SAMotionKey* pKey_, const SAModelKey* pMesh_)
-{
-    Entity& rEntity = Globals::Game::entities[entityId_];
-    rEntity.blinkIntent = AnimationIntent{pKey_, nullptr, true, pMesh_};
-}
-
-void changeAnimation(PoolId entityId_, const STH2005::MotionKey& rKey_, bool loop_)
-{
-    Entity& rEntity = Globals::Game::entities[entityId_];
-    rEntity.animationIntent = AnimationIntent{nullptr, &rKey_, loop_};
 }
 
 /* Posts a one-shot presentation event (see GameEvents) and registers what handles one by name. */
@@ -275,7 +243,7 @@ void setEntityMesh(PoolId entityId_, const MeshChoice& rChoice_)
     if(!rEntity.isExternalOnly())
     {
         std::string disc = rEntity.defaultMesh;
-        if(rChoice_.kind == MeshChoiceKind::Disc) disc = rEntity.sourceEngine == STH2005_ONE ? "(mesh)/" + rChoice_.name : rChoice_.name;
+        if(rChoice_.kind == MeshChoiceKind::Disc) disc = gameDiscMeshName(rEntity.sourceEngine, rChoice_.name);
         rEntity.setDiscMesh(disc);
     }
     rEntity.setOverrideModel(pExternal);
@@ -339,66 +307,6 @@ Level& getLevelByName(const char* name_)
 
 
 /*
-SADX object, see spawnPrefab: the prefab's model (or the variant the SET record picked, SpawnParams::pModel), the key's textures (untextured if it has none), the collision shapes if there are any, and the first motion the key lists, looping (without behaviour
-nothing chooses a motion; the generator puts one that looks like an idle first). A motion that can't be read is only reported. Collision and the script behaviour only with inScene_ (see spawnPrefab).
-*/
-static void buildSAObject(Entity& rEntity_, PoolId shaderId_, const Prefab& rPrefab_, const SpawnParams& rParams_, bool inScene_)
-{
-    const SAEntityKey& rKey = *rPrefab_.saKey;
-    const SAModelKey& rModel = rParams_.pModel != nullptr ? *rParams_.pModel : rKey.model;
-    const std::vector<SACollisionShapesKey>& rCollisions = rParams_.pCollisions != nullptr ? *rParams_.pCollisions : rKey.collisions;
-    if(rKey.textures.path != nullptr) rEntity_.setSAGPUInstance(shaderId_, rModel, rKey.textures);
-    else rEntity_.setSAGPUInstance(shaderId_, rModel);
-    if(inScene_)
-    {
-        if(!rCollisions.empty()) rEntity_.setSACollisionShapes(rCollisions);
-        Scripting::setupPrefab(rEntity_.selfId, Globals::Game::prefabs.names[rEntity_.prefabId.id].c_str(), rParams_.pPlacement);
-    }
-
-    if(!rKey.motions.empty())
-    {
-        try
-        {
-            rEntity_.playSAMotion(rKey.motions[0]);
-        }
-        catch(const std::runtime_error& rError)
-        {
-            std::fprintf(stderr, "Spawn: %s %s has no motion: %s\n", rKey.name, rParams_.what.c_str(), rError.what());
-        }
-    }
-}
-
-/*
-Shadow object, see spawnPrefab: one model of the key (SpawnParams::modelIndex, an index into EntityKey::models) with the key's textures and the collision shapes given (the key's if none are). The first motion the key lists is played on the first model
-(index 0) only, looping for living things (Prefab::loopMotion) and otherwise once, holding its last frame (placeholder: for TANK and TURNOVER it is the "_on" one, a state change). A motion that can't be read is
-reported and the entity stays posed at rest: the .MTP layout was decoded from SHADOW.MTP only. Collision and the script behaviour only with inScene_ (see spawnPrefab).
-*/
-static void buildONEObject(Entity& rEntity_, PoolId shaderId_, const Prefab& rPrefab_, const SpawnParams& rParams_, bool inScene_)
-{
-    const STH2005::EntityKey& rKey = *rPrefab_.oneKey;
-    const std::vector<STH2005::CollisionKey>& rCollisions = rParams_.pONECollisions != nullptr ? *rParams_.pONECollisions : rKey.collisions;
-    if(rKey.textures.entry != nullptr) rEntity_.setONEGPUInstance(shaderId_, rKey.models.at(rParams_.modelIndex), rKey.textures);
-    else rEntity_.setONEGPUInstance(shaderId_, rKey.models.at(rParams_.modelIndex));
-    if(inScene_)
-    {
-        if(!rCollisions.empty()) rEntity_.setONECollisionShapes(rCollisions);
-        Scripting::setupPrefab(rEntity_.selfId, Globals::Game::prefabs.names[rEntity_.prefabId.id].c_str(), nullptr);
-    }
-
-    if(rParams_.modelIndex == 0 && !rKey.motions.empty())
-    {
-        try
-        {
-            rEntity_.playONEMotion(rKey.motions[0], rPrefab_.loopMotion);
-        }
-        catch(const std::runtime_error& rError)
-        {
-            std::fprintf(stderr, "Spawn: %s %s has no motion: %s\n", rKey.name, rParams_.what.c_str(), rError.what());
-        }
-    }
-}
-
-/*
 Makes one entity from a prefab at any time (the level's SET and placement records, a script's spawnPlayer, the editor): an entity named rParams_.name (the prefab's name if empty) at the position and rotation given, with Entity::prefabId set, built as the
 prefab's kind says (buildSAObject, buildONEObject; the players are Sonic's and Shadow's model, idle motions, body shape (their Changed file's) and physics of weight 1, which the script then attaches with attachPlayer), and the behaviours the script registered for
 the prefab (sf.prefabBehavior, called with rParams_.pPlacement, its SET record, null for an object that has none). Returns its id, or UninitializedPoolId if it could not be made: the entity is removed again and the reason, with rParams_.what naming where it came from,
@@ -426,28 +334,6 @@ PoolId spawnPrefab(PoolId prefabId_, PoolId shaderId_, const SpawnParams& rParam
         rEntity.setRotation(rParams_.rotation);
         switch(rPrefab.kind)
         {
-        case PrefabKind::SAObject:
-            buildSAObject(rEntity, shaderId_, rPrefab, rParams_, inScene);
-            break;
-        case PrefabKind::ONEObject:
-            buildONEObject(rEntity, shaderId_, rPrefab, rParams_, inScene);
-            break;
-        case PrefabKind::SonicPlayer:
-            rEntity.setSAGPUInstance(shaderId_, Loading::sonicKeys().mesh, Loading::sonicKeys().textures);
-            rEntity.playSAMotion(Loading::sonicKeys().idle);
-            if(inScene)
-            {
-                rEntity.setPhysics(1.0f);
-            }
-            break;
-        case PrefabKind::ShadowPlayer:
-            rEntity.setONEGPUInstance(shaderId_, Loading::shadowKeys().mesh, Loading::shadowKeys().textures);
-            for(const STH2005::MotionKey& rMotion : Loading::shadowKeys().idle) rEntity.playONEMotion(rMotion);
-            if(inScene)
-            {
-                rEntity.setPhysics(1.0f);
-            }
-            break;
         /* The model and texture are the prefab's definition, so they are applied in every pool (the editor's thumbnails draw them too), not only in the scene. */
         case PrefabKind::External:
             rEntity.setExternalOnly(Graphics::getShaderId("GLTF"));
@@ -473,6 +359,10 @@ PoolId spawnPrefab(PoolId prefabId_, PoolId shaderId_, const SpawnParams& rParam
                 }
                 else std::fprintf(stderr, "Spawn: %s %s: there is no external texture named %s\n", rPrefab.name.c_str(), rParams_.what.c_str(), rPrefab.definition.texture.name.c_str());
             }
+            break;
+        /* The prefabs of the game's own kinds (Game/GamePrefab.cpp). */
+        default:
+            buildGamePrefab(rEntity, shaderId_, rPrefab, rParams_, inScene);
             break;
         }
     }

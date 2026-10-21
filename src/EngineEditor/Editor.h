@@ -120,6 +120,7 @@ struct Editor
 	bool rightPressed = false;
 	bool upPressed = false;
 	bool downPressed = false;
+	bool probePressed = false;
 	bool gizmoKeyPressed[3] = {false, false, false};
 
 	/* Click to select (processInputs): a left press the UI and the gizmo did not take is pending until the button is released (a camera hold cancels it). clickX / clickY: where the press was. */
@@ -163,6 +164,9 @@ struct Editor
 	*/
 	void importTexture(const std::string& path_, const std::string& name_, bool inLevel_);
 	void importModel(const std::string& gltfPath_, const std::string& name_, bool inLevel_);
+
+	/* File > Export Library.gltf (DebugUI; Loading::exportLibrary, docs/TODO.md HubWorld.gltf pipeline): writes Library.gltf and its textures into the folder, and says in fileMessage how many models were written, skipped or repeated. Not run. */
+	void exportLibrary(const std::string& folder_);
 
 	/*
 	What setPlaying keeps of one entity at Play for the way back. A property the editor can edit and Stop must give back is a field here (captured in one place, Editor.cpp keptEntityOf, and given back in one, giveKeptEntity), not a vector of its own.

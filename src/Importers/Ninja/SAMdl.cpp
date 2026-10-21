@@ -91,6 +91,7 @@ static uint32_t addCorner(Graphics::BasicMesh& rMesh_, const std::vector<glm::ve
 		throw std::runtime_error(std::format("SA1Mdl: poly references vertex {} but the attach has {}.", positionIndex_, rPositions_.size()));
 	}
 	rMesh_.verticies.push_back(Graphics::Vertex{rPositions_[positionIndex_], glm::vec3(0.0f), uv_, glm::vec4(1.0f)});
+	rMesh_.sourceVertex.push_back(positionIndex_);
 	return static_cast<uint32_t>(rMesh_.verticies.size() - 1);
 }
 
@@ -125,6 +126,7 @@ static Graphics::SASubmesh readMeshset(const SAModelSource& rSrc_, uint32_t mesh
 {
 	Graphics::SASubmesh submesh;
 	Graphics::BasicMesh& rMesh = submesh.mesh;
+	rMesh.sourceMesh = meshsetOffset_;
 
 	uint16_t polyType = read<uint16_t>(rSrc_, meshsetOffset_) >> 14;
 	uint16_t polyCount = read<uint16_t>(rSrc_, meshsetOffset_ + 0x02);
@@ -198,7 +200,7 @@ unclamped one repeats the texture. Observed on the land tables of _Stg01 and _St
 the axis' UVs are within one texture (V 100%, U 99%), with it clear they are not (0%), so the unclamped ones tile. The meaning of
 the other bits is unknown and they are ignored, except bit 17 (0x20000) and bit 18 (0x40000), read as flip V and flip U: an axis that is not clamped then mirrors the texture at
 every repeat (hypothesis: Ninja's NJD_FLAG_FLIP_V / FLIP_U as remembered, not decoded from a file; seen set, with no clamp bit, on the coil of the spring "Rotatable Spring" (0x94262400), whose UVs run
-from 2 to 12 times the texture in U and -1 to 1 in V). The diffuse color is ignored too (0xB2B2B2 on all of
+from 2 to 12 times the texture in U and -1 to 1 in V). Bits 29-31 and 26-28 are the source and destination blend factors, read only as "both 1" (additive, see SASubmesh::additive). The diffuse color is ignored too (0xB2B2B2 on all of
 Sonic's materials), since the lighting that uses them is not implemented.
 */
 static void readAttach(const SAModelSource& rSrc_, uint32_t attachOffset_, Graphics::SANode& rNode_)
@@ -248,6 +250,7 @@ static void readAttach(const SAModelSource& rSrc_, uint32_t attachOffset_, Graph
 			submesh.flipV = (attributes & 0x20000) != 0;
 			submesh.flipU = (attributes & 0x40000) != 0;
 			submesh.doubleSided = (attributes & 0x800000) != 0;
+			submesh.additive = ((attributes >> 29) & 7) == 1 && ((attributes >> 26) & 7) == 1;
 		}
 
 		submesh.mesh.create();

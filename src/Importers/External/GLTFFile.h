@@ -35,14 +35,6 @@ What writeGLTF writes. A scene is flat tables referenced by index: nodes (childr
 conversion, no scale and no winding change, so a reader gets back the importer's own numbers (docs/ARCHITECTURE.md, glTF writer). Optional arrays (normals, uvs, colors, the four source fields below) are
 left out when empty, and when present must have one entry per position.
 */
-enum class FieldEncoding
-{
-	/* Attributes _SRC, _SRCFLAG, _SRCIDX (uint32 scalar) and _ORIG (vec3 float). */
-	Custom,
-	/* TEXCOORD_1 = (SRC, SRCFLAG), TEXCOORD_2 = (ORIG.x, ORIG.y), TEXCOORD_3 = (ORIG.z, SRCIDX), float32; the integers are exact up to 2^24 - 1 and larger ones throw. TEXCOORD_0 stays the uv. */
-	TexCoord
-};
-
 struct GLTFPrimitive
 {
 	std::vector<glm::vec3> positions;
@@ -96,7 +88,7 @@ struct GLTFScene
 
 /*
 Writes the scene as rPath_ (.gltf) and, next to it, the same name with .bin. Every primitive is a triangle list with uint32 indices; positions carry min and max. Throws std::runtime_error naming the file for
-an array of the wrong size, an index past the vertices, a bad node, mesh, material or image index, or a field too large for the encoding.
+an array of the wrong size, an index past the vertices, a bad node, mesh, material or image index, or a source field above 2^24 - 1.
 */
-void writeGLTF(const std::string& rPath_, const GLTFScene& rScene_, FieldEncoding encoding_);
+void writeGLTF(const std::string& rPath_, const GLTFScene& rScene_);
 }

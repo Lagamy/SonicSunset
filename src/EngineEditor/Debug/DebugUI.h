@@ -48,5 +48,8 @@ struct DebugUI
 	char importModelPath[256] = "";
 	char importModelName[64] = "";
 	bool importModelInLevel = false;
+
+	/* File > Export Library.gltf: the folder it is written into. */
+	char exportLibraryFolder[256] = "Library";
 };
 }

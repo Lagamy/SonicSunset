@@ -2,6 +2,7 @@
 #include <vector>
 #include <glad/glad.h>
 #include <glm/glm.hpp>
+#include "Constants.h"
 #include "PoolId.h"
 #include "Texture.h"
 
@@ -14,6 +15,9 @@ struct SANodeSample
 	glm::vec3 rotation;
 	glm::vec3 scale;
 };
+
+/* The rotation that turns a node to face the camera being drawn for (the transpose of the view's rotation); Renderer sets it before it draws a camera's entities. */
+inline glm::mat3 cameraFacing = glm::mat3(1.0f);
 
 float advanceMotionFrame(float frame_, float delta_, uint32_t frameCount_, bool loop_);
 
@@ -47,6 +51,9 @@ struct SAInstance
 	bool poseDirty = false;
 	/* A texture drawn on every textured submesh in place of the binding's (an external texture, Entity::setOverrideTexture); nullptr = the binding's. It points into the external pools, which outlive the entities that use it. */
 	Texture* pOverrideTexture = nullptr;
+	/* The one node drawn facing the camera (cameraFacing), with the Texture iconTextureId in place of the binding's (the item box's icon, Entity::setSAIcon); -1 = none. */
+	int32_t iconNode = -1;
+	PoolId iconTextureId = UninitializedPoolId;
 
 	void update(float deltaTime_);
 	float playbackRate() const;

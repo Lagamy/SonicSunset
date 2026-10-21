@@ -2,7 +2,7 @@
 #include "GPU_Globals.h"
 #include "RenderStats.h"
 #include "GPU_API.h"
-#include "ResourceLoader.h"
+#include "GameLoaders.h"
 #include <algorithm>
 #include <cmath>
 #include <glm/gtc/type_ptr.hpp>
@@ -186,6 +186,7 @@ The local matrix is nodePose[i] when the instance has a pose, otherwise the rest
 Relies on SAMesh storing parents before children.
 A submesh with a texture id in the instance's TextureBinding has it bound to unit 0 (the shader's baseTexture) and hasTexture set,
 with the wrap of its material set on the texture before each draw (a texture used by materials that disagree is set again per submesh). With pOverrideTexture every textured submesh takes that one.
+The iconNode, if there is one, is drawn at its place with the rotation of cameraFacing instead of its own (scale kept), and with iconTextureId.
 */
 void SAInstance::draw(const glm::mat4& rBase_)
 {
@@ -203,11 +204,19 @@ void SAInstance::draw(const glm::mat4& rBase_)
 	/* Back-face culling is on for the whole renderer; a double sided submesh (SASubmesh::doubleSided) turns it off for its draw only. */
 	bool cullDisabled = false;
 
+	/* An additive submesh (SASubmesh::additive) adds its color to the framebuffer and does not write depth, so what is drawn after it, in the model's order, still shows through it; the blend function and depth mask are put back after the last one. */
+	bool additiveOn = false;
+
 	for(size_t i = 0; i < rSAMesh.nodes.size(); i++)
 	{
 		SANode& rNode = rSAMesh.nodes[i];
 		const glm::mat4& rLocal = this->nodePose.empty() ? rNode.localTransform : this->nodePose[i];
 		world[i] = (rNode.parent < 0 ? rBase_ : world[rNode.parent]) * rLocal;
+		if(static_cast<int32_t>(i) == this->iconNode)
+		{
+			glm::vec3 scale(glm::length(glm::vec3(world[i][0])), glm::length(glm::vec3(world[i][1])), glm::length(glm::vec3(world[i][2])));
+			world[i] = glm::translate(glm::mat4(1.0f), glm::vec3(world[i][3])) * glm::mat4(cameraFacing) * glm::scale(glm::mat4(1.0f), scale);
+		}
 
 		if(rNode.submeshes.empty()) continue;
 		renderStats.uniformUploads++;
@@ -216,6 +225,7 @@ void SAInstance::draw(const glm::mat4& rBase_)
 		{
 			SASubmesh& rSubmesh = rNode.submeshes[s];
 			PoolId textureId = pBinding ? pBinding->submeshTextureIds[i][s] : UninitializedPoolId;
+			if(static_cast<int32_t>(i) == this->iconNode && this->iconTextureId != UninitializedPoolId && textureId != UninitializedPoolId) textureId = this->iconTextureId;
 			bool hasTexture = textureId != UninitializedPoolId;
 			if(hasTexture)
 			{
@@ -243,8 +253,27 @@ void SAInstance::draw(const glm::mat4& rBase_)
 				else glEnable(GL_CULL_FACE);
 				cullDisabled = rSubmesh.doubleSided;
 			}
+			if(rSubmesh.additive != additiveOn)
+			{
+				if(rSubmesh.additive)
+				{
+					glBlendFunc(GL_ONE, GL_ONE);
+					glDepthMask(GL_FALSE);
+				}
+				else
+				{
+					glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+					glDepthMask(GL_TRUE);
+				}
+				additiveOn = rSubmesh.additive;
+			}
 			rSubmesh.mesh.draw();
 		}
+	}
+	if(additiveOn)
+	{
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glDepthMask(GL_TRUE);
 	}
 	if(cullDisabled) glEnable(GL_CULL_FACE);
 }

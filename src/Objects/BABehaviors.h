@@ -4,6 +4,7 @@
 #include "Constants.h"
 #include "ExternalField.h"
 #include <cstdint>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -14,12 +15,14 @@ struct Collision;
 }
 
 /*
-A remap: which behaviour each raw value of a game has (BABehaviors::resolve looks them up once when a collision is loaded, so the collision system never sees raw values). A raw value that is not listed has the fallback.
+A remap: which behaviour each raw value of a game has, and which tags of its own besides the behaviour's (BABehaviors::resolve looks them up once when a collision is loaded, so the collision system never sees raw values). A raw value that is not listed has the fallback and no tags of its own.
 Four are used, one per kind of data: a level's triangle values and an object's shape attributes (Physics::CollisionShape::attr), for each game. They are read from External/Collision/Remaps.json (BABehaviors::loadRemaps).
 */
 struct BARemap
 {
 	std::vector<std::pair<uint32_t, PoolId>> entries;
+	/* The tags of a raw value besides its behaviour's (a value without any has no key). */
+	std::map<uint32_t, std::vector<PoolId>> tags;
 	PoolId fallback = UninitializedPoolId;
 };
 
@@ -87,9 +90,9 @@ struct BABehaviors
 	void init();
 
 	/*
-	Reads the four remaps from the file (Assets/External/Collision/Remaps.json: ShadowLevel, SADXLevel, SADXShape, ShadowShape, each {"fallback": behaviour name, "values": {"<raw, hex or decimal string>": behaviour name}}; "note" is ignored).
+	Reads the four remaps from the file (Assets/External/Collision/Remaps.json: ShadowLevel, SADXLevel, SADXShape, ShadowShape, each {"fallback": behaviour name, "values": {"<raw, hex or decimal string>": behaviour name, or {"behavior": name, "tags": [tag name]} for a value with tags of its own}}; "note" is ignored).
 	Once, after init, before any collision is loaded. Throws std::runtime_error if the file is missing or wrong, a behaviour
-	name is unknown or a raw value is listed twice.
+	or tag name is unknown or a raw value is listed twice.
 	*/
 	void loadRemaps(const std::string& path_);
 
@@ -135,6 +138,12 @@ struct BABehaviors
 #ifdef EDITOR
 	/* Writes boundAreas to Assets/External/Collision/BoundAreas.json and the source tree's External/Collision/BoundAreas.json. Throws if a file can't be written. */
 	void saveBoundAreas() const;
+
+	/*
+	Gives the raw value raw_ the behaviour behavior_ and the tags tags_ (besides the behaviour's; empty = none, written as the plain name) in rRemap_ (one of the four remaps) and writes it into the "values" of the section named section_ ("ShadowLevel", "SADXLevel", ...) of Assets/External/Collision/Remaps.json
+	and the source tree's copy, keeping the rest of the files (notes, fallback). Collisions already loaded keep their old behaviours: the caller changes Collision::behaviorByValue and tagsByValue. Throws if a file can't be read or written.
+	*/
+	void setRemapValue(const char* section_, BARemap& rRemap_, uint32_t raw_, PoolId behavior_, const std::vector<PoolId>& tags_);
 #endif
 
 	/* Adds a tag or a behaviour under its key's name; throws if that name is taken in that pool. */
@@ -149,7 +158,7 @@ struct BABehaviors
 
 	/*
 	Gives every distinct raw triangle value of the collision's mesh (its own attribute, or its piece's flags, see CollisionMesh::triangleValue) its behaviour in Collision::behaviorByValue, sets
-	Collision::fallbackBehavior and the behaviour of every shape from its attr, all from rRemap_. Called when a collision is loaded.
+	Collision::fallbackBehavior, the tags of its own of each value in Collision::tagsByValue, and the behaviour and tags of every shape from its attr, all from rRemap_. Called when a collision is loaded.
 	*/
 	void resolve(Physics::Collision& rCollision_, const BARemap& rRemap_) const;
 };

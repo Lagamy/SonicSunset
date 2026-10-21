@@ -35,7 +35,7 @@ inline const SAEntityKey SAEntity_EmeraldCoast_11{"CMN_DRING", {"_Main.rel", 0x2
 /* O BALOON: Balloon */
 inline const SAEntityKey SAEntity_EmeraldCoast_12{"O BALOON", {"_Main.rel", 0x2B2FC4}, {"obj_regular.gvm"}, {}, {{"_Main.rel", 0x2C0DB0, 2}}, {}};
 /* O ITEMBOX: Item Box */
-inline const SAEntityKey SAEntity_EmeraldCoast_13{"O ITEMBOX", {"_Main.rel", 0x2B4084}, {"obj_regular.gvm"}, {}, {{"_Main.rel", 0x2C14E0, 2}, {"_Main.rel", 0x2C1480, 2}}, {}};
+inline const SAEntityKey SAEntity_EmeraldCoast_13{"O ITEMBOX", {"_Main.rel", 0x2B4084}, {"obj_regular.gvm"}, {}, {{"_Main.rel", 0x2C14E0, 2}, {"_Main.rel", 0x2C1480, 2}}, {}, {}, {35, 72, 33, 32, 34, 71, 31, 73, 70}};
 /* Rocket H: Rocket Platform */
 inline const SAEntityKey SAEntity_EmeraldCoast_14{"Rocket H", {"_Main.rel", 0x2B4CA8}, {"obj_regular.gvm"}, {}, {{"_Main.rel", 0x25C770, 1}}, {}};
 /* Rocket HS: Rocket Platform */
@@ -70,8 +70,8 @@ inline const SAEntityKey SAEntity_EmeraldCoast_35{"YASI3", {"_Stg01.rel", 0x1C27
 inline const SAEntityKey SAEntity_EmeraldCoast_36{"O BFLOOT", {"_Stg01.rel", 0x1C49CC}, {"obj_beach.GVM"}, {}, {}, {}};
 /* O BUNGA: Bungalow */
 inline const SAEntityKey SAEntity_EmeraldCoast_37{"O BUNGA", {"_Stg01.rel", 0x1C42D4}, {"obj_beach.GVM"}, {}, {}, {}};
-/* O BGIRO: Rubber Rope */
-inline const SAEntityKey SAEntity_EmeraldCoast_38{"O BGIRO", {"_Stg01.rel", 0x2282AC}, {"obj_beach.GVM"}, {}, {{"_Stg01.rel", 0x2493E8, 1}, {"_Stg01.rel", 0x249388, 2}}, {}};
+/* O BGIRO: Spike Gate */
+inline const SAEntityKey SAEntity_EmeraldCoast_38{"O BGIRO", {"_Stg01.rel", 0x1C5B24}, {"obj_beach.GVM"}, {}, {{"_Stg01.rel", 0x2493E8, 1}, {"_Stg01.rel", 0x249388, 2}}, {}};
 /* O IWA: Water Platform */
 inline const SAEntityKey SAEntity_EmeraldCoast_39{"O IWA", {"_Stg01.rel", 0x1CC1FC}, {"obj_beach.GVM"}, {}, {}, {}};
 /* O JUMP: Launch Board */

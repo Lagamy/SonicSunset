@@ -28,14 +28,13 @@ const float CubeRadius = CubeHalf * std::sqrt(3.0f);
 constexpr int CubeBlue = 0;
 constexpr int CubeRed = 1;
 constexpr int CubePurple = 2;
-constexpr int CubeGrey = 3;
 
 int cubeOf(const Prefab& rPrefab_)
 {
 	if(rPrefab_.hasCollision && rPrefab_.hasBehaviour) return CubePurple;
 	if(rPrefab_.hasCollision) return CubeBlue;
 	if(rPrefab_.hasBehaviour) return CubeRed;
-	return CubeGrey;
+	return PrefabThumbnails::CubeGrey;
 }
 }
 
@@ -123,7 +122,7 @@ void PrefabThumbnails::endFrame()
 }
 
 /*
-Draws one prefab into the target and copies it. The entity (if the prefab has a model) is made at the origin by spawnPrefab with its own defaults, except that an SADX key with only variant models (no model of its own) uses its first variant; one that can't be made
+Draws one prefab into the target and copies it. The entity (if the prefab has a model) is made at the origin by spawnPrefab with its own defaults, except what the game changes in the params (prepareThumbnailParams: for SADX, a key with only variant models (no model of its own) uses its first variant); one that can't be made
 (spawnPrefab reports why on stderr) is drawn as a cube. update(0) poses it at the start of its motion. The state it changes (the framebuffer, the viewport, the clear colour) is put back for the rest of the frame.
 */
 GLuint PrefabThumbnails::render(PoolId prefabId_)
@@ -134,69 +133,11 @@ GLuint PrefabThumbnails::render(PoolId prefabId_)
 	{
 		SpawnParams params;
 		params.what = "(thumbnail)";
-		if(rPrefab.kind == PrefabKind::SAObject && rPrefab.saKey->model.rel == nullptr)
-		{
-			for(const SAModelKey& rVariant : rPrefab.saKey->variantModels)
-			{
-				if(rVariant.rel != nullptr)
-				{
-					params.pModel = &rVariant;
-					break;
-				}
-			}
-		}
-		entityId = spawnPrefab(prefabId_, getShaderId(rPrefab.game == SA_NINJA ? "SA" : "STH2005"), params, &this->entities);
+		prepareThumbnailParams(rPrefab, params);
+		entityId = spawnPrefab(prefabId_, getShaderId(gameShaderName(rPrefab.game)), params, &this->entities);
 	}
 
 	return this->draw(entityId, cubeOf(rPrefab));
-}
-
-/*
-A model of a disc as a picture, with no prefab: source_ is a catalog source of the AssetPanel. SADX "<rel> @ 0x<offset>" is the Ninja model whose root NJS_OBJECT is at that offset of the .rel (importSAModel), drawn untextured (which texture archive goes with a
-model is not known); Shadow "<archive> > <entry>.DFF" is a static model (a part with no .BON, see importModel), drawn with the .TXD of the same name in the same archive if textured_ (the caller found the entry there; hypothesis: that is how the stage objects are paired) and untextured if not.
-The entity is made in the pool of its own and removed after the draw, like a prefab's. Returns 0 if it can't be drawn (a land table, which is not a model, another file type, or an importer throwing, which is reported on stderr).
-*/
-GLuint PrefabThumbnails::renderModel(int game_, const std::string& source_, bool textured_)
-{
-	PoolId entityId = UninitializedPoolId;
-	try
-	{
-		PoolId shaderId = getShaderId(game_ == 0 ? "SA" : "STH2005");
-		entityId = addEntity("(thumbnail)", glm::vec3(0.0f), &this->entities);
-		if(game_ == 0)
-		{
-			size_t split = source_.find(" @ 0x");
-			if(split == std::string::npos || source_.find("land table", split) != std::string::npos)
-			{
-				this->entities.remove(entityId);
-				return 0;
-			}
-			SAModelKey key{this->keep(source_.substr(0, split)), static_cast<uint32_t>(std::stoul(source_.substr(split + 5), nullptr, 16))};
-			this->entities[entityId].setSAGPUInstance(shaderId, key);
-		}
-		else
-		{
-			size_t split = source_.find(" > ");
-			if(split == std::string::npos)
-			{
-				this->entities.remove(entityId);
-				return 0;
-			}
-			const char* pArchive = this->keep(source_.substr(0, split));
-			std::string entry = source_.substr(split + 3);
-			STH2005::ModelKey key{{pArchive}, this->keep("(thumbnail)/" + source_), {{this->keep(entry), nullptr, nullptr}}};
-			std::string textureEntry = entry.substr(0, entry.rfind('.')) + ".TXD";
-			if(textured_) this->entities[entityId].setONEGPUInstance(shaderId, key, STH2005::TextureKey{{pArchive}, this->keep(textureEntry)});
-			else this->entities[entityId].setONEGPUInstance(shaderId, key);
-		}
-	}
-	catch(const std::exception& rError_)
-	{
-		std::fprintf(stderr, "PrefabThumbnails: %s: %s\n", source_.c_str(), rError_.what());
-		if(entityId != UninitializedPoolId) this->entities.remove(entityId);
-		return 0;
-	}
-	return this->draw(entityId, CubeGrey);
 }
 
 /* The text as a string that lives for the rest of the run (a mesh keeps the strings of the key it was made from); the same text gives the same string. */

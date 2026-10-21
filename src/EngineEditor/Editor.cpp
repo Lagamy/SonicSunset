@@ -10,6 +10,7 @@
 #include "ExternalAssets.h"
 #include "GLTFFile.h"
 #include "TextureFile.h"
+#include "LibraryExport.h"
 #include "imgui.h"
 #include <filesystem>
 #include <format>
@@ -723,7 +724,7 @@ PoolId Editor::spawnFrom(const Clipboard& rCopy_, const glm::vec3& rPosition_, P
 	params.name = rCopy_.name;
 	params.what = "(editor)";
 	params.levelId = rCopy_.hubWorld ? UninitializedPoolId : levelId;
-	PoolId id = spawnPrefab(rCopy_.prefabId, Graphics::getShaderId(rPrefab.game == SA_NINJA ? "SA" : "STH2005"), params);
+	PoolId id = spawnPrefab(rCopy_.prefabId, Graphics::getShaderId(gameShaderName(rPrefab.game)), params);
 	if(id == UninitializedPoolId)
 	{
 		this->fileMessage = "Could not make " + rCopy_.name + ", see the log.";
@@ -971,7 +972,7 @@ void Editor::restoreKeptEntities(PoolId levelId_, const std::vector<uint32_t>& r
 			params.position = rAdded.entity.position;
 			params.what = "(editor)";
 			params.levelId = levelId_;
-			PoolId id = spawnPrefab(rAdded.prefabId, Graphics::getShaderId(Globals::Game::prefabs[rAdded.prefabId].game == SA_NINJA ? "SA" : "STH2005"), params);
+			PoolId id = spawnPrefab(rAdded.prefabId, Graphics::getShaderId(gameShaderName(Globals::Game::prefabs[rAdded.prefabId].game)), params);
 			if(id == UninitializedPoolId) continue;
 			rLevel.entityIds.push_back(id);
 			giveKeptEntity(id, rAdded.entity);
@@ -1044,6 +1045,19 @@ void Editor::importTexture(const std::string& path_, const std::string& name_, b
 	catch(const std::exception& rError)
 	{
 		this->fileMessage = std::string("Import texture failed: ") + rError.what();
+	}
+}
+
+void Editor::exportLibrary(const std::string& folder_)
+{
+	try
+	{
+		Loading::LibraryReport report = Loading::exportLibrary(folder_);
+		this->fileMessage = std::format("Library.gltf: {} models and {} levels written, {} failed (stderr), {} repeated, in {}", report.written, report.levels, report.failed, report.duplicates, folder_);
+	}
+	catch(const std::exception& rError)
+	{
+		this->fileMessage = std::string("Export Library failed: ") + rError.what();
 	}
 }
 
@@ -1168,7 +1182,7 @@ void Editor::giveKeptLevel(PoolId levelId_, const KeptLevel& rKept_)
 		params.position = rAdded.entity.position;
 		params.what = "(editor)";
 		params.levelId = levelId_;
-		PoolId id = spawnPrefab(rAdded.prefabId, Graphics::getShaderId(Globals::Game::prefabs[rAdded.prefabId].game == SA_NINJA ? "SA" : "STH2005"), params);
+		PoolId id = spawnPrefab(rAdded.prefabId, Graphics::getShaderId(gameShaderName(Globals::Game::prefabs[rAdded.prefabId].game)), params);
 		if(id == UninitializedPoolId) continue;
 		rLevel.entityIds.push_back(id);
 		giveKeptEntity(id, rAdded.entity);
@@ -1506,6 +1520,60 @@ void Editor::processInputs()
 	if(downDown && !this->downPressed) this->text.selectMode(1);
 	this->upPressed = upDown;
 	this->downPressed = downDown;
+
+	/*
+	P prints where the view ray (from the camera shown on the screen, through the crosshair at the center of the window) first hits a model: the nearest triangle of any live entity (Entity::rayHitsModel) or level (Level::rayHitsInstance), the drawn triangles, not the collision, as a world position, with the entity's or level's name and, for a level, the hit mesh's texture (Level::meshTexture). A debug aid to find a spot in a level (a texture problem, say).
+	*/
+	bool probeDown = glfwGetKey(pWindow, GLFW_KEY_P) == GLFW_PRESS;
+	if(probeDown && !this->probePressed && !this->debugUI.wantsKeyboard())
+	{
+		const Camera& rViewCamera = this->active ? static_cast<const Camera&>(this->camera) : getMainCamera();
+		float nearest = rViewCamera.farPlane;
+		uint32_t nearestEntity = 0;
+		uint32_t nearestLevel = 0;
+		const Graphics::BasicMesh* nearestMesh = nullptr;
+		bool found = false;
+		for(uint32_t i = 0; i < Globals::Game::entities.objects.size(); i++)
+		{
+			if(!Globals::Game::entities.alive[i]) continue;
+			float distance = 0.0f;
+			bool hasTriangles = false;
+			if(Globals::Game::entities.objects[i].rayHitsModel(rViewCamera.position, rViewCamera.front, distance, hasTriangles) && distance < nearest)
+			{
+				nearest = distance;
+				nearestEntity = i;
+				found = true;
+			}
+		}
+		bool foundLevel = false;
+		for(uint32_t i = 0; i < Globals::Game::levels.objects.size(); i++)
+		{
+			if(!Globals::Game::levels.alive[i]) continue;
+			float distance = 0.0f;
+			const Graphics::BasicMesh* pMesh = nullptr;
+			if(Globals::Game::levels.objects[i].rayHitsInstance(rViewCamera.position, rViewCamera.front, distance, &pMesh) && distance < nearest)
+			{
+				nearest = distance;
+				nearestLevel = i;
+				foundLevel = true;
+				nearestMesh = pMesh;
+			}
+		}
+		if(foundLevel)
+		{
+			glm::vec3 hit = rViewCamera.position + rViewCamera.front * nearest;
+			std::string texture = Globals::Game::levels.objects[nearestLevel].meshTexture(nearestMesh);
+			std::printf("view ray hit: (%.2f, %.2f, %.2f) distance %.2f level %s texture %s\n", hit.x, hit.y, hit.z, nearest, Globals::Game::levels.objects[nearestLevel].name.c_str(), texture.empty() ? "(none)" : texture.c_str());
+		}
+		else if(found)
+		{
+			glm::vec3 hit = rViewCamera.position + rViewCamera.front * nearest;
+			std::printf("view ray hit: (%.2f, %.2f, %.2f) distance %.2f entity %s\n", hit.x, hit.y, hit.z, nearest, Globals::Game::entities.names[nearestEntity].c_str());
+		}
+		else std::printf("view ray: no hit\n");
+		std::fflush(stdout);
+	}
+	this->probePressed = probeDown;
 }
 
 void Editor::onMouse(float xOffset_, float yOffset_)
@@ -1521,7 +1589,7 @@ void Editor::onScroll(float yOffset_)
 
 void Editor::draw()
 {
-	if(this->active || this->debugMenuOpen) this->debugUI.draw(*this);
+	if(this->initialized) this->debugUI.draw(*this);
 }
 
 void Editor::destroy()

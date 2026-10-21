@@ -48,7 +48,7 @@ private:
 	/* The game indices of the External assets: Global (the project's) and Level (the open level's); GameCount counts them with the two games. */
 	static constexpr int Global = ScopeNav::Global;
 	static constexpr int Level = Global + 1;
-	static constexpr int GameCount = 4;
+	static constexpr int GameCount = Global + 2;
 
 	enum Kind
 	{
@@ -76,7 +76,7 @@ private:
 	std::array<std::array<std::array<std::vector<Asset>, 5>, KindCount>, GameCount> assets;
 	std::array<std::array<uint32_t, KindCount>, GameCount> counts{};
 	/* The same counts of only the assets the open level uses (disc games only). */
-	std::array<std::array<uint32_t, KindCount>, 2> levelCounts{};
+	std::array<std::array<uint32_t, KindCount>, GameSourceCount> levelCounts{};
 	/* What refreshLevel last looked at (the level and its entity count); ~0 = not yet. */
 	uint64_t levelSeen = ~0ull;
 

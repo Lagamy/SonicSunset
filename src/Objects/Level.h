@@ -1,6 +1,5 @@
 #pragma once
 #include "Entity.h"
-#include "SAKeys.h"
 #include "GLTFKeys.h"
 #include "Camera.h"
 #include "PoolId.h"
@@ -12,6 +11,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <utility>
 #include <string>
 #include <vector>
 #include <glm/glm.hpp>
@@ -35,9 +35,7 @@ struct EntityRecipe
 	PoolId prefabId = UninitializedPoolId;
 	PoolId shaderId = UninitializedPoolId;
 	SpawnParams params;
-	std::shared_ptr<const Ninja::SAPlacement> placement;
-	std::vector<STH2005::CollisionKey> oneCollisions;
-	bool hasOneCollisions = false;
+#include "GameEntityRecipe.inl"
 	bool fromSource = false;
 	uint32_t addedIndex = 0;
 };
@@ -55,11 +53,8 @@ struct EntityBaseline
 	std::vector<Physics::CollisionShape> shapes;
 	MeshChoice mesh;
 	TextureChoice texture;
-	AnimationIntent animationIntent;
-	AnimationIntent blinkIntent;
-	float animationRate = 0.0f;
-	float animationBlendRate = 0.0f;
 	bool behaviorNotCulled = false;
+#include "GameEntityBaseline.inl"
 
 	/* The view state of the entity's camera module (hasCamera), the part of it a script or the editor changes; the render target is the one the build made. */
 	bool hasCamera = false;
@@ -75,6 +70,12 @@ struct EntityBaseline
 	PoolId cameraRenderTargetId = UninitializedPoolId;
 };
 
+/*
+Defined by the game (Game/GameLevel.cpp): the parts of an entity that are the game's, put into / compared with its baseline (the motion it wants, GameEntityBaseline.inl). gameBaselineChanged is true if one differs.
+*/
+void captureGameBaseline(EntityBaseline& rBaseline_, const Entity& rEntity_);
+bool gameBaselineChanged(const Entity& rEntity_, const EntityBaseline& rBaseline_);
+
 /* One entity the level's build made: its position in entityIds as built (index, the number the level file's edits name it by), how to make it again and what it was like. */
 struct BuiltEntity
 {
@@ -86,7 +87,7 @@ struct BuiltEntity
 /*
 A level is the static world geometry of a stage, the counterpart of Entity for things without behaviour.
 It is created first and gets its instance afterwards, with setSAGPUInstance (an SADX land table) or setONEGPUInstance
-(a Shadow stage), both from the keys of ResourceKeys.h: whatever the keys name that is not loaded yet is loaded then.
+(a Shadow stage), the game's (Game/GameLevelMembers.inl), both from the keys of ResourceKeys.h: whatever the keys name that is not loaded yet is loaded then.
 setGLTFGPUInstance (a level of glTF files, GLTFKeys.h, sourceEngine GLTF_FILE; it has no entities of its own: setSAEntities / setONEEntities are not called for it). Only one of the three can be called, once. Until instanceId is set it is neither updated nor drawn. Removing the level from its pool (destroy) removes the instance and its collision.
 collisionId is the PoolId of the level's collision in Globals::Physics::collisions (UninitializedPoolId = none), created by setSACollision / setONECollision / setGLTFCollision (the triangles of the key's collision files, all solid); it is independent of the instance, so a level can have collision without being drawn. Its Collision::position follows the level's position (setPosition, and when the collision is set). Setting or removing it, or moving the level, rebuilds Globals::Physics::quadTree (CollisionSystem::rebuildQuadTree).
 setONEEntities creates the objects a Shadow stage places: an Entity (added to Globals::Game::entities, owned by the level and removed in destroy) for every record of the key's placement files whose type id the key lists, made from that EntityKey (its first model and its textures, and its collisions as shapes). Positions are the records' ones with the yaw the level is drawn with and the level's position; the records' rotation is given to the entities (Entity::setRotation); the other models (outside a Variant) are not used and the first motion of a key plays once (looping for the enemies and characters, Prefab::loopMotion). A record whose type the key does not list gets a marker (a cross, see CollisionView::markers) instead of an entity. Only once; an object that fails to load is reported on stderr and skipped.
@@ -97,7 +98,7 @@ sourceEngine says which engine the instance is from, as in Entity.
 */
 struct Level
 {
-	SourceEngineEnum sourceEngine = SA_NINJA;
+	SourceEngineEnum sourceEngine = DefaultSourceEngine;
 	PoolId instanceId = UninitializedPoolId;
 	glm::vec3 position;
 	PoolId collisionId = UninitializedPoolId;
@@ -137,8 +138,8 @@ struct Level
 	glm::vec3 boundsMax = glm::vec3(0.0f);
 	bool hasBounds = false;
 
-	void setSAGPUInstance(PoolId shaderId_, const SALandTableKey& rLandTable_, const SATextureSetKey& rTextures_, const std::vector<std::string>& rSkippedTextures_);
-	void setONEGPUInstance(PoolId shaderId_, const STH2005::LevelKey& rLevel_, const std::vector<std::string>& rSkippedEntries_);
+	/* The setters of the game's own levels (instance, collision, entities from its data): Game/GameLevelMembers.inl, defined in Game/GameLevel.cpp. */
+#include "GameLevelMembers.inl"
 	void setGLTFGPUInstance(PoolId shaderId_, const GLTFLevelKey& rLevel_);
 	void setPosition(const glm::vec3& rPosition_);
 
@@ -158,10 +159,17 @@ struct Level
 	void commitHubWorldCollision();
 	/* Puts the collision where the level's place says (turned by hubWorldRotation, at hubWorldPosition + that turn of position), without rebuilding the quad tree. */
 	void placeCollision();
-	void setONEEntities(PoolId shaderId_, const STH2005::LevelKey& rLevel_);
-	void setSAEntities(PoolId shaderId_, const SALandTableKey& rLandTable_);
-	void setSACollision(const SALandTableKey& rLandTable_);
-	void setONECollision(const STH2005::LevelKey& rLevel_);
+
+	/* Defined by the game (Game/GameLevel.cpp), for the levels whose sourceEngine is not GLTF_FILE: the center and radius of each piece of the instance (in the level's space, for computeBounds), drawing it, and removing it from its pool. */
+	void instancePieces(std::vector<std::pair<glm::vec3, float>>& rPieces_) const;
+	void drawInstance(const glm::mat4& rBase_, const Camera& rCamera_);
+	/* The meshes of the instance's pieces with their placement in the level's space (the yaw of a Shadow level included), for rayHitsInstance. */
+	void instanceMeshes(std::vector<std::pair<const Graphics::BasicMesh*, glm::mat4>>& rMeshes_) const;
+	void destroyInstance();
+	/* Editor / debug picking: whether the ray (world space, unit direction) crosses a triangle of the level's drawn geometry (both sides, as drawn: HubWorld place and position applied); distance_ is along the ray to the nearest one. */
+	bool rayHitsInstance(const glm::vec3& rOrigin_, const glm::vec3& rDirection_, float& rDistance_, const Graphics::BasicMesh** ppMesh_ = nullptr);
+	/* Defined by the game (Game/GameLevel.cpp): the texture of a mesh of this level's instance (one rayHitsInstance gave), as text for the debug print: an SA mesh as "<texture set> / <entry name> (id <texture id>)", a Shadow mesh as its Texture pool id; empty when the mesh is untextured or not of the instance. */
+	std::string meshTexture(const Graphics::BasicMesh* pMesh_) const;
 	void setGLTFCollision(const GLTFLevelKey& rLevel_);
 
 	/*

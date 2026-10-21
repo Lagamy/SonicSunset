@@ -3,7 +3,7 @@
 #include "Globals.h"
 #include "API.h"
 #include "Editor.h"
-#include "SAMesh.h"
+#include "GameShapes.h"
 #include "imgui.h"
 #include <algorithm>
 #include <cmath>
@@ -127,7 +127,11 @@ void CollisionView::rebuildLevelLines(const std::vector<PoolId>& rCollisionIds_)
 		{
 			auto found = std::find_if(this->attributes.begin(), this->attributes.end(), [&](const AttributeCount& rEntry_) { return rEntry_.attribute == value; });
 			auto behavior = rCollision.behaviorByValue.find(value);
-			if(found == this->attributes.end()) this->attributes.push_back(AttributeCount{value, 1, attributeColor(value), behaviorName(behavior != rCollision.behaviorByValue.end() ? behavior->second : rCollision.fallbackBehavior)});
+			if(found == this->attributes.end())
+			{
+				auto tags = rCollision.tagsByValue.find(value);
+				this->attributes.push_back(AttributeCount{value, 1, attributeColor(value), behaviorName(behavior != rCollision.behaviorByValue.end() ? behavior->second : rCollision.fallbackBehavior), tags != rCollision.tagsByValue.end() ? tags->second : std::vector<PoolId>{}});
+			}
 			else found->count++;
 		}
 	}
@@ -343,17 +347,21 @@ void CollisionView::draw(const Camera& rCamera_)
 	std::array<glm::vec4, 6> entityPlanes = rCamera_.frustumPlanes();
 	std::map<uint32_t, std::pair<uint32_t, PoolId>> shapeValues;
 	bool drawEntities = this->enabled || this->boundAreaTabActive;
+	std::vector<PoolId> selectedEntities = editor.entityList.selection();
 	for(uint32_t i = 0; drawEntities && i < Globals::Game::entities.objects.size(); i++)
 	{
 		if(!Globals::Game::entities.alive[i]) continue;
 		const Entity& rEntity = Globals::Game::entities.objects[i];
 		if(!levelShown(rEntity.levelId)) continue;
 		glm::vec3 entityPosition = rEntity.renderPosition();
-		if(glm::distance(entityPosition, rCamera_.position) > distance) continue;
+
+		/* The selected entities' shapes are drawn from any distance and view. */
+		bool isSelected = std::find(selectedEntities.begin(), selectedEntities.end(), rEntity.selfId) != selectedEntities.end();
+		if(!isSelected && glm::distance(entityPosition, rCamera_.position) > distance) continue;
 
 		/* An entity outside the view (with a margin for a big shape far from its position) is not drawn: building every shape's lines every frame is expensive. */
 		constexpr float EntityCullRadius = 150.0f;
-		if(!sphereInFrustum(entityPlanes, entityPosition, EntityCullRadius)) continue;
+		if(!isSelected && !sphereInFrustum(entityPlanes, entityPosition, EntityCullRadius)) continue;
 		glm::mat4 entityRotation = rEntity.renderRotation();
 		if(rEntity.physicsId != UninitializedPoolId)
 		{
@@ -372,7 +380,7 @@ void CollisionView::draw(const Camera& rCamera_)
 				rValue.second = rShape.behavior;
 				if(this->colorByAttribute && this->hasSelectedEntityValue && rShape.attr != this->selectedEntityValue) continue;
 				glm::vec4 shapeColor = this->colorByAttribute ? attributeColor(rShape.attr) : glm::vec4(0.0f, 1.0f, 1.0f, 1.0f);
-				addShapeLines(addLine, Physics::scaledShape(rShape, rEntity.collisionScale(), rEntity.sourceEngine == SA_NINJA), entityPosition, rEntity.sourceEngine == SA_NINJA ? entityRotation : glm::mat4(1.0f), rEntity.sourceEngine == SA_NINJA, shapeColor);
+				addShapeLines(addLine, Physics::scaledShape(rShape, rEntity.collisionScale(), usesNinjaShapes(rEntity.sourceEngine)), entityPosition, usesNinjaShapes(rEntity.sourceEngine) ? entityRotation : glm::mat4(1.0f), usesNinjaShapes(rEntity.sourceEngine), shapeColor);
 			}
 			const Physics::CollisionMesh& rMesh = rCollision.mesh;
 			for(size_t t = 0; t + 2 < rMesh.indices.size(); t += 3)
@@ -448,10 +456,8 @@ void CollisionView::draw(const Camera& rCamera_)
 	}
 	if(!dynamic.empty())
 	{
-		glDisable(GL_DEPTH_TEST);
 		glBindVertexArray(this->dynamicVAO);
 		glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(dynamic.size()));
-		glEnable(GL_DEPTH_TEST);
 	}
 }
 
@@ -463,6 +469,51 @@ void CollisionView::destroy()
 	glDeleteBuffers(1, &this->fillVBO);
 	glDeleteVertexArrays(1, &this->dynamicVAO);
 	glDeleteBuffers(1, &this->dynamicVBO);
+}
+
+/*
+A level's triangle values get their behaviour and their own tags from the remap of its game (Shadow stage: ShadowLevel; SADX and glTF levels: SADXLevel). The remap is changed and saved once per game, then each shown collision of that game
+takes the new behaviour for the value (so the collision system sees it at once, without reloading).
+*/
+void CollisionView::setLevelValueBehavior(uint32_t value_, PoolId behavior_, const std::vector<PoolId>& tags_)
+{
+	BABehaviors& rBehaviors = Globals::Game::baBehaviors;
+	try
+	{
+		bool doneShadow = false;
+		bool doneSADX = false;
+		for(uint32_t i = 0; i < Globals::Game::levels.objects.size(); i++)
+		{
+			if(!Globals::Game::levels.alive[i]) continue;
+			const Level& rLevel = Globals::Game::levels.objects[i];
+			if(rLevel.collisionId == UninitializedPoolId || std::find(this->shownLevelCollisions.begin(), this->shownLevelCollisions.end(), rLevel.collisionId) == this->shownLevelCollisions.end()) continue;
+			bool shadow = rLevel.sourceEngine == STH2005_ONE;
+			bool& rDone = shadow ? doneShadow : doneSADX;
+			if(!rDone)
+			{
+				rBehaviors.setRemapValue(shadow ? "ShadowLevel" : "SADXLevel", shadow ? rBehaviors.remapShadowLevel : rBehaviors.remapSADXLevel, value_, behavior_, tags_);
+				rDone = true;
+			}
+			Physics::Collision& rCollision = Globals::Physics::collisions[rLevel.collisionId];
+			auto found = rCollision.behaviorByValue.find(value_);
+			if(found != rCollision.behaviorByValue.end())
+			{
+				found->second = behavior_;
+				rCollision.tagsByValue[value_] = tags_;
+			}
+		}
+		for(AttributeCount& rEntry : this->attributes)
+		{
+			if(rEntry.attribute != value_) continue;
+			rEntry.behavior = behaviorName(behavior_);
+			rEntry.tags = tags_;
+		}
+		this->remapError.clear();
+	}
+	catch(const std::exception& rError)
+	{
+		this->remapError = rError.what();
+	}
 }
 
 /*
@@ -481,15 +532,59 @@ void CollisionView::drawPanel()
 			if(this->enabled && this->colorByAttribute && !this->attributes.empty())
 			{
 				ImGui::Text("%u values", static_cast<uint32_t>(this->attributes.size()));
+				if(!this->remapError.empty()) ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", this->remapError.c_str());
 				ImGui::BeginChild("CollisionValues", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None);
+				constexpr float ComboWidth = 150.0f;
+				constexpr float TagsWidth = 60.0f;
 				for(int i = 0; i < static_cast<int>(this->attributes.size()); i++)
 				{
 					const CollisionView::AttributeCount& rEntry = this->attributes[i];
 					char line[96];
-					std::snprintf(line, sizeof(line), "0x%08X  %s  %u triangles", rEntry.attribute, rEntry.behavior.c_str(), rEntry.count);
+					std::snprintf(line, sizeof(line), "0x%08X  %u triangles", rEntry.attribute, rEntry.count);
+					ImGui::PushID(i);
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(rEntry.color.r, rEntry.color.g, rEntry.color.b, 1.0f));
-					if(ImGui::Selectable(line, i == this->selectedAttribute)) this->selectedAttribute = i == this->selectedAttribute ? -1 : i;
+					if(ImGui::Selectable(line, i == this->selectedAttribute, 0, ImVec2(ImGui::GetContentRegionAvail().x - ComboWidth - TagsWidth - ImGui::GetStyle().ItemSpacing.x * 2.0f, 0.0f))) this->selectedAttribute = i == this->selectedAttribute ? -1 : i;
 					ImGui::PopStyleColor();
+					ImGui::SameLine();
+					ImGui::SetNextItemWidth(ComboWidth);
+					if(ImGui::BeginCombo("##behavior", rEntry.behavior.c_str()))
+					{
+						for(uint32_t b = 0; b < Globals::Game::behaviors.objects.size(); b++)
+						{
+							if(!Globals::Game::behaviors.alive[b]) continue;
+							if(ImGui::Selectable(Globals::Game::behaviors.names[b].c_str(), Globals::Game::behaviors.names[b] == rEntry.behavior))
+							{
+								this->setLevelValueBehavior(rEntry.attribute, PoolId{b, Globals::Game::behaviors.generation[b]}, rEntry.tags);
+							}
+						}
+						ImGui::EndCombo();
+					}
+					/* The value's own tags, besides its behaviour's: the button shows how many, the popup has a checkbox per tag. */
+					ImGui::SameLine();
+					char tagsLabel[32];
+					std::snprintf(tagsLabel, sizeof(tagsLabel), "Tags (%u)", static_cast<uint32_t>(rEntry.tags.size()));
+					if(ImGui::Button(tagsLabel, ImVec2(TagsWidth, 0.0f))) ImGui::OpenPopup("ValueTags");
+					if(ImGui::BeginPopup("ValueTags"))
+					{
+						const auto& rTags = Globals::Game::baTags;
+						auto behavior = Globals::Game::behaviors.nameToId.find(rEntry.behavior);
+						for(uint32_t t = 0; t < rTags.objects.size(); t++)
+						{
+							if(!rTags.alive[t]) continue;
+							PoolId tagId{t, rTags.generation[t]};
+							auto has = std::find(rEntry.tags.begin(), rEntry.tags.end(), tagId);
+							bool checked = has != rEntry.tags.end();
+							if(ImGui::Checkbox(rTags.names[t].c_str(), &checked) && behavior != Globals::Game::behaviors.nameToId.end())
+							{
+								std::vector<PoolId> tags = rEntry.tags;
+								if(checked) tags.push_back(tagId);
+								else tags.erase(std::find(tags.begin(), tags.end(), tagId));
+								this->setLevelValueBehavior(rEntry.attribute, behavior->second, tags);
+							}
+						}
+						ImGui::EndPopup();
+					}
+					ImGui::PopID();
 				}
 				ImGui::EndChild();
 			}

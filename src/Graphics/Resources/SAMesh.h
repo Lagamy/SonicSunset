@@ -15,6 +15,7 @@ namespace Graphics
 textureIndex is the material's texture id from the file, an index into the file order of the TextureSet that
 the instance's TextureBinding resolves it against. The mesh itself holds no Texture pool ids, so different bindings can texture the same mesh differently.
 clampU / clampV come from the material: an axis that is not clamped repeats the texture, mirrored at every repeat with flipU / flipV (see readAttach).
+additive is a material whose source and destination blend factors (attribute bits 29-31 and 26-28) are both 1 (disc file: the item box's object _Main.rel 0x2B38E4 (hypothesis: its glass), attributes 0x2671A400, texture fine_sky_ref, opaque CMPR; other materials such as 0x94218400 are 4 / 5, source alpha over inverse source alpha; the factor numbering is external, SA Tools' blend modes as remembered, not checked): it is drawn by adding its color to the framebuffer, without writing depth.
 doubleSided is bit 23 (0x800000) of the material's attributes: the submesh is drawn without back-face culling (external: SA Tools' material flags / Ninja's NJD_FLAG_DOUBLE_SIDE as remembered; the same enum as the clamp and flip bits above; not yet checked on a model file).
 */
 constexpr uint32_t SANoTexture = 0xFFFFFFFF;
@@ -28,6 +29,7 @@ struct SASubmesh
 	bool flipU = false;
 	bool flipV = false;
 	bool doubleSided = false;
+	bool additive = false;
 };
 
 /* NJS_OBJECT eval flags that change the local transform (external, SA Tools Enums.cs ObjectFlags). */

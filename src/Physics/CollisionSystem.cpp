@@ -1,6 +1,6 @@
 #include "CollisionSystem.h"
 #include "Globals.h"
-#include "SAMesh.h"
+#include "GameShapes.h"
 #include "Editor.h"
 #include <algorithm>
 #include <cmath>
@@ -177,7 +177,15 @@ struct Capsule
 	PoolId behavior;
 	/* The shape's index in Collision::shapes (what an interaction tells the script, see Interaction). */
 	int shapeIndex;
+	/* The shape's own tags (CollisionShape::tags), nullptr if it has none. */
+	const std::vector<PoolId>* pTags;
 };
+
+/* The shape's own tags for BABehavior's questions: nullptr if it has none. */
+static const std::vector<PoolId>* extraTagsOf(const CollisionShape& rShape_)
+{
+	return rShape_.tags.empty() ? nullptr : &rShape_.tags;
+}
 
 static std::vector<Capsule> capsulesOf(const Collision& rCollision_)
 {
@@ -188,12 +196,12 @@ static std::vector<Capsule> capsulesOf(const Collision& rCollision_)
 		PoolId behavior = rShape.behavior != UninitializedPoolId ? rShape.behavior : Globals::Game::baBehaviors.body;
 		if(rShape.form == 0)
 		{
-			capsules.push_back(Capsule{rShape.center, glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, rShape.a, behavior, static_cast<int>(s)});
+			capsules.push_back(Capsule{rShape.center, glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, rShape.a, behavior, static_cast<int>(s), extraTagsOf(rShape)});
 		}
 		else if(rShape.form == 6)
 		{
 			glm::mat4 rotation = Graphics::composeNinjaTransform(glm::vec3(0.0f), glm::vec3(rShape.angle), glm::vec3(1.0f), Graphics::NinjaNoPosition | Graphics::NinjaNoScale);
-			capsules.push_back(Capsule{rShape.center, glm::vec3(rotation * glm::vec4(0.0f, 0.0f, 1.0f, 0.0f)), rShape.b, rShape.a, behavior, static_cast<int>(s)});
+			capsules.push_back(Capsule{rShape.center, glm::vec3(rotation * glm::vec4(0.0f, 0.0f, 1.0f, 0.0f)), rShape.b, rShape.a, behavior, static_cast<int>(s), extraTagsOf(rShape)});
 		}
 	}
 	return capsules;
@@ -212,10 +220,10 @@ struct Interaction
 };
 
 /*
-The interactions of an overlap of a collision of rA_ owned by aEntity_ (its shape aShape_, -1 for none) and one of rB_ owned by bEntity_ (bShape_): each side's functions for the other's tags, each once, each with its own side's shape. A function already
+The interactions of an overlap of a collision of rA_ owned by aEntity_ (its shape aShape_, -1 for none) and one of rB_ owned by bEntity_ (bShape_): each side's functions for the other's tags (its behaviour's and pAExtra_ / pBExtra_, the collision's own), each once, each with its own side's shape. A function already
 collected for the same parent and contact keeps the shape of the first overlap.
 */
-static void collectInteractions(const BABehavior& rA_, PoolId aEntity_, int aShape_, const BABehavior& rB_, PoolId bEntity_, int bShape_, std::vector<Interaction>& rOut_)
+static void collectInteractions(const BABehavior& rA_, PoolId aEntity_, int aShape_, const BABehavior& rB_, PoolId bEntity_, int bShape_, const std::vector<PoolId>* pAExtra_, const std::vector<PoolId>* pBExtra_, std::vector<Interaction>& rOut_)
 {
 	auto add = [&](const BAInteraction& rFunction_, PoolId parent_, PoolId contact_, int parentShape_)
 	{
@@ -225,8 +233,8 @@ static void collectInteractions(const BABehavior& rA_, PoolId aEntity_, int aSha
 		}
 		rOut_.push_back(Interaction{rFunction_, parent_, contact_, parentShape_});
 	};
-	rA_.forEachInteraction(rB_, [&](const BAInteraction& rFunction_) { add(rFunction_, aEntity_, bEntity_, aShape_); });
-	rB_.forEachInteraction(rA_, [&](const BAInteraction& rFunction_) { add(rFunction_, bEntity_, aEntity_, bShape_); });
+	rA_.forEachInteraction(rB_, [&](const BAInteraction& rFunction_) { add(rFunction_, aEntity_, bEntity_, aShape_); }, pBExtra_);
+	rB_.forEachInteraction(rA_, [&](const BAInteraction& rFunction_) { add(rFunction_, bEntity_, aEntity_, bShape_); }, pAExtra_);
 }
 
 /*
@@ -285,7 +293,7 @@ static bool castRay(const glm::vec3& rStart_, const glm::vec3& rDirection_, floa
 		const CollisionMesh& rMesh = rCollision.mesh;
 		PoolId areaId = rCollision.behaviorOf(rEntry.triangle);
 		if(areaId == UninitializedPoolId) continue;
-		if(!Globals::Game::behaviors[moverBehavior_].collidesWith(Globals::Game::behaviors[areaId])) continue;
+		if(!Globals::Game::behaviors[moverBehavior_].collidesWith(Globals::Game::behaviors[areaId], rCollision.extraTagsOf(rEntry.triangle))) continue;
 
 		glm::vec3 a = rMesh.vertices[rMesh.indices[rEntry.triangle * 3]];
 		glm::vec3 b = rMesh.vertices[rMesh.indices[rEntry.triangle * 3 + 1]];
@@ -372,8 +380,9 @@ static void moveCapsules(uint32_t entityIndex_, const std::vector<Capsule>& rCap
 					if(areaId == UninitializedPoolId) continue;
 					const BABehavior& rArea = Globals::Game::behaviors[areaId];
 					const BABehavior& rMoverBehavior = Globals::Game::behaviors[rCapsule.behavior];
-					bool solid = rMoverBehavior.collidesWith(rArea);
-					bool touchable = rMoverBehavior.interactsWith(rArea) || rArea.interactsWith(rMoverBehavior);
+					const std::vector<PoolId>* pAreaTags = rCollision.extraTagsOf(rEntry.triangle);
+					bool solid = rMoverBehavior.collidesWith(rArea, pAreaTags);
+					bool touchable = rMoverBehavior.interactsWith(rArea, pAreaTags) || rArea.interactsWith(rMoverBehavior, rCapsule.pTags);
 					if(!solid && !touchable) continue;
 
 					glm::vec3 a = rMesh.vertices[rMesh.indices[rEntry.triangle * 3]];
@@ -418,7 +427,7 @@ static void moveCapsules(uint32_t entityIndex_, const std::vector<Capsule>& rCap
 					float distance = glm::length(away);
 					if(distance >= rCapsule.radius) continue;
 
-					if(touchable) collectInteractions(rMoverBehavior, entityId, rCapsule.shapeIndex, rArea, rCollision.entityId, -1, interactions);
+					if(touchable) collectInteractions(rMoverBehavior, entityId, rCapsule.shapeIndex, rArea, rCollision.entityId, -1, rCapsule.pTags, pAreaTags, interactions);
 					if(!solid) continue;
 
 					float depth = rCapsule.radius - distance;
@@ -613,7 +622,7 @@ struct WorldShape
 
 static bool worldShapeOf(const Entity& rEntity_, const CollisionShape& rSourceShape_, WorldShape& rOut_)
 {
-	bool sadx = rEntity_.sourceEngine == SA_NINJA;
+	bool sadx = usesNinjaShapes(rEntity_.sourceEngine);
 	const CollisionShape rShape_ = scaledShape(rSourceShape_, rEntity_.collisionScale(), sadx);
 	glm::mat4 entityRotation = sadx ? rEntity_.rotation : glm::mat4(1.0f);
 	glm::mat4 rotation = entityRotation * Graphics::composeNinjaTransform(glm::vec3(0.0f), glm::vec3(rShape_.angle), glm::vec3(1.0f), Graphics::NinjaNoPosition | Graphics::NinjaNoScale);
@@ -800,7 +809,7 @@ boundingRadius. False for a form that is not touched. Cheap enough to do for eve
 */
 static bool boundsOf(const Entity& rEntity_, const CollisionShape& rSourceShape_, glm::vec3& rCenter_, float& rRadius_)
 {
-	const CollisionShape rShape_ = scaledShape(rSourceShape_, rEntity_.collisionScale(), rEntity_.sourceEngine == SA_NINJA);
+	const CollisionShape rShape_ = scaledShape(rSourceShape_, rEntity_.collisionScale(), usesNinjaShapes(rEntity_.sourceEngine));
 	if(rShape_.form == 0) rRadius_ = rShape_.a;
 	else if(rShape_.form == 6) rRadius_ = rShape_.b + rShape_.a;
 	else if(rShape_.form == 1 || rShape_.form == 2) rRadius_ = std::max(rShape_.b * 0.5f - rShape_.a, 0.0f) + rShape_.a;
@@ -808,7 +817,7 @@ static bool boundsOf(const Entity& rEntity_, const CollisionShape& rSourceShape_
 	else if((rShape_.form >= 3 && rShape_.form <= 5) || rShape_.form == 7) rRadius_ = glm::length(glm::vec3(rShape_.a, rShape_.b, rShape_.c));
 	else return false;
 	glm::vec3 center = rShape_.center;
-	if(rEntity_.sourceEngine == SA_NINJA) center = glm::vec3(rEntity_.rotation * glm::vec4(center, 0.0f));
+	if(usesNinjaShapes(rEntity_.sourceEngine)) center = glm::vec3(rEntity_.rotation * glm::vec4(center, 0.0f));
 	rCenter_ = rEntity_.position + center;
 	return true;
 }
@@ -929,7 +938,7 @@ static void updateEntityContacts()
 			for(uint32_t index : candidates)
 			{
 				ShapeRef& rOther = shapes[index];
-				if(rOther.entity == rMover.entity || !rMover.pBehavior->collidesWith(*rOther.pBehavior)) continue;
+				if(rOther.entity == rMover.entity || !rMover.pBehavior->collidesWith(*rOther.pBehavior, extraTagsOf(*rOther.pShape))) continue;
 				if(spheresApart(rMover.center, rMover.radius, rOther.center, rOther.radius)) continue;
 				glm::vec3 push;
 				float depth;
@@ -970,9 +979,11 @@ static void updateEntityContacts()
 			if(spheresApart(shapes[i].center, shapes[i].radius, shapes[j].center, shapes[j].radius)) continue;
 			const BABehavior& rA = *shapes[i].pBehavior;
 			const BABehavior& rB = *shapes[j].pBehavior;
-			if(!rA.interactsWith(rB) && !rB.interactsWith(rA)) continue;
+			const std::vector<PoolId>* pATags = extraTagsOf(*shapes[i].pShape);
+			const std::vector<PoolId>* pBTags = extraTagsOf(*shapes[j].pShape);
+			if(!rA.interactsWith(rB, pBTags) && !rB.interactsWith(rA, pATags)) continue;
 			if(!shapesOverlap(shapeOf(shapes[i]), shapeOf(shapes[j]))) continue;
-			collectInteractions(rA, shapes[i].parent, shapes[i].shapeIndex, rB, shapes[j].parent, shapes[j].shapeIndex, interactions);
+			collectInteractions(rA, shapes[i].parent, shapes[i].shapeIndex, rB, shapes[j].parent, shapes[j].shapeIndex, pATags, pBTags, interactions);
 		}
 	}
 	for(const Interaction& rInteraction : interactions)
@@ -1041,7 +1052,7 @@ void CollisionSystem::update()
 		(or anywhere, if nothing solid is hit) is called, once.
 		*/
 		const BABehavior& rBody = Globals::Game::behaviors[Globals::Game::baBehaviors.body];
-		struct Touch { float t; PoolId area; PoolId parent; };
+		struct Touch { float t; PoolId area; PoolId parent; std::vector<PoolId> tags; };
 		std::vector<Touch> touches;
 		float nearest = 2.0f;
 		for(const QuadTreeEntry& rEntry : candidates)
@@ -1051,14 +1062,15 @@ void CollisionSystem::update()
 			PoolId areaId = rCollision.behaviorOf(rEntry.triangle);
 			if(areaId == UninitializedPoolId) continue;
 			const BABehavior& rArea = Globals::Game::behaviors[areaId];
-			bool solid = rBody.collidesWith(rArea);
-			bool touchable = rBody.interactsWith(rArea) || rArea.interactsWith(rBody);
+			const std::vector<PoolId>* pAreaTags = rCollision.extraTagsOf(rEntry.triangle);
+			bool solid = rBody.collidesWith(rArea, pAreaTags);
+			bool touchable = rBody.interactsWith(rArea, pAreaTags) || rArea.interactsWith(rBody);
 			if(!solid && !touchable) continue;
 
 			float t;
 			if(!segmentTriangle(start - rCollision.position, end - rCollision.position, rMesh.vertices[rMesh.indices[rEntry.triangle * 3]], rMesh.vertices[rMesh.indices[rEntry.triangle * 3 + 1]], rMesh.vertices[rMesh.indices[rEntry.triangle * 3 + 2]], t)) continue;
 			if(solid && t < nearest) nearest = t;
-			if(touchable) touches.push_back(Touch{t, areaId, rCollision.entityId});
+			if(touchable) touches.push_back(Touch{t, areaId, rCollision.entityId, pAreaTags != nullptr ? *pAreaTags : std::vector<PoolId>{}});
 		}
 		if(nearest <= 1.0f)
 		{
@@ -1074,7 +1086,7 @@ void CollisionSystem::update()
 		for(const Touch& rTouch : touches)
 		{
 			if(rTouch.t > nearest) continue;
-			collectInteractions(rBody, entityId, -1, Globals::Game::behaviors[rTouch.area], rTouch.parent, -1, interactions);
+			collectInteractions(rBody, entityId, -1, Globals::Game::behaviors[rTouch.area], rTouch.parent, -1, nullptr, rTouch.tags.empty() ? nullptr : &rTouch.tags, interactions);
 		}
 		for(const Interaction& rInteraction : interactions)
 		{

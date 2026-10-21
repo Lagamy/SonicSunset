@@ -3,7 +3,7 @@
 #include "ONEInstance.h"
 #include "GPU_Globals.h"
 #include "RenderStats.h"
-#include "ResourceLoader.h"
+#include "GameLoaders.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 

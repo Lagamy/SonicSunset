@@ -1,4 +1,5 @@
 #include "PlayerLoader.h"
+#include "Paths.h"
 #include <nlohmann/json.hpp>
 #include <deque>
 #include <format>
@@ -105,7 +106,7 @@ void loadShadow(const std::string& rPath_)
 
 void loadPlayerKeys()
 {
-	const std::string folder = "Assets/External/Players/";
+	const std::string folder = Paths::Players;
 	try
 	{
 		loadSonic(folder + "Sonic.json");

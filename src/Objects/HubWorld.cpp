@@ -1,4 +1,5 @@
 #include "HubWorld.h"
+#include "Paths.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -26,7 +27,7 @@ void HubWorld::read()
 {
 	this->levels.clear();
 	this->entities.clear();
-	std::ifstream stream("Assets/HubWorld.json");
+	std::ifstream stream(Paths::HubWorld);
 	if(!stream) return;
 	try
 	{
@@ -104,7 +105,7 @@ void HubWorld::write() const
 		if(!rEntity.state.empty()) entities.back()["state"] = Json::parse(rEntity.state);
 	}
 	std::string text = Json{{"levels", levels}, {"entities", entities}}.dump(2);
-	for(const std::string& rPath : {std::string("Assets/HubWorld.json"), std::string(SF_SOURCE_DIR "/HubWorld.json")})
+	for(const std::string& rPath : {std::string(Paths::HubWorld), std::string(Paths::SourceHubWorld)})
 	{
 		std::ofstream out(rPath);
 		if(!out) throw std::runtime_error(std::format("can't write {}.", rPath));

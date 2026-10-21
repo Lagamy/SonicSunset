@@ -1,5 +1,6 @@
 #include "AssetThumbnails.h"
 #include "Globals.h"
+#include "GameDiscs.h"
 #include "GPU_Globals.h"
 #include "Gvm.h"
 #include "PrefabThumbnails.h"

@@ -57,6 +57,7 @@ void DebugUI::draw(Editor& rEditor_)
 		bool openSwapCollision = false;
 		bool openImportTexture = false;
 		bool openImportModel = false;
+		bool openExportLibrary = false;
 		if(ImGui::BeginMainMenuBar())
 		{
 			if(ImGui::BeginMenu("File"))
@@ -91,6 +92,7 @@ void DebugUI::draw(Editor& rEditor_)
 					}
 					ImGui::EndMenu();
 				}
+				if(ImGui::MenuItem("Export Library.gltf...")) openExportLibrary = true;
 				if(ImGui::MenuItem("Save Source Game Level", nullptr, false, levelId != UninitializedPoolId)) rEditor_.saveSourceLevel();
 				if(ImGui::MenuItem("Restore Source Game Level", nullptr, false, levelId != UninitializedPoolId)) rEditor_.restoreSourceValues();
 				ImGui::EndMenu();
@@ -110,6 +112,20 @@ void DebugUI::draw(Editor& rEditor_)
 		if(openSwapCollision) ImGui::OpenPopup("Swap collision file");
 		if(openImportTexture) ImGui::OpenPopup("Import texture");
 		if(openImportModel) ImGui::OpenPopup("Import model");
+		if(openExportLibrary) ImGui::OpenPopup("Export Library");
+		if(ImGui::BeginPopupModal("Export Library", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+		{
+			ImGui::TextUnformatted("Writes Library.gltf (every entity model of both games with its textures) and its PNGs into the folder, read from the discs: it takes a while.");
+			ImGui::InputText("Folder", this->exportLibraryFolder, sizeof(this->exportLibraryFolder));
+			if(ImGui::Button("Export"))
+			{
+				rEditor_.exportLibrary(this->exportLibraryFolder);
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+		}
 		if(ImGui::BeginPopupModal("Import texture", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 		{
 			ImGui::TextUnformatted("Copies the image into Assets/External as an external texture (the name must be new).");
@@ -225,7 +241,7 @@ void DebugUI::draw(Editor& rEditor_)
 		rEditor_.prefabPanel.draw(rEditor_.entityList.selected, rEditor_.camera);
 	}
 
-	/* The Debug window is for playing only (Tab); the editor has the same collision settings in the Level panel's Collision tab. */
+	if(!rEditor_.active && rEditor_.debugMenuOpen)
 	if(!rEditor_.active)
 	{
 		ImGui::SetNextWindowPos(ImVec2(rEditor_.entityList.width + 10.0f, 10.0f), ImGuiCond_FirstUseEver);
@@ -302,6 +318,14 @@ void DebugUI::draw(Editor& rEditor_)
 			rEditor_.gizmo.drawLevels(rEditor_.camera, positions);
 		}
 	}
+
+	/* A crosshair at the center of the window, where the view ray of the P key (Editor::processInputs) goes through. */
+	ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
+	ImDrawList* pForeground = ImGui::GetForegroundDrawList();
+	pForeground->AddLine(ImVec2(center.x - 10.0f, center.y), ImVec2(center.x + 10.0f, center.y), IM_COL32(0, 0, 0, 255), 4.0f);
+	pForeground->AddLine(ImVec2(center.x, center.y - 10.0f), ImVec2(center.x, center.y + 10.0f), IM_COL32(0, 0, 0, 255), 4.0f);
+	pForeground->AddLine(ImVec2(center.x - 9.0f, center.y), ImVec2(center.x + 9.0f, center.y), IM_COL32(255, 255, 255, 255), 2.0f);
+	pForeground->AddLine(ImVec2(center.x, center.y - 9.0f), ImVec2(center.x, center.y + 9.0f), IM_COL32(255, 255, 255, 255), 2.0f);
 
 	ImGui::Render();
 	glDisable(GL_FRAMEBUFFER_SRGB);

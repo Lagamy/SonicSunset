@@ -1,4 +1,5 @@
 #include "AssetPanel.h"
+#include "Paths.h"
 #include "Prefab.h"
 #include "ExternalAssets.h"
 #include "GPU_Globals.h"
@@ -27,10 +28,10 @@ constexpr float TileSize = 72.0f;
 
 /* How many times the rows on screen are also kept loaded above and below them (2 = about five times what is on screen stays loaded, so a small scroll does not unload and reload from the disc). */
 constexpr int PrefetchRows = 2;
-constexpr const char* CatalogPath = "Assets/Catalog/AssetCatalog.tsv";
-constexpr const char* FolderIconPath = "Assets/Catalog/folder_icon.png";
-constexpr const char* ScriptsPath = "Assets/Scripts";
-constexpr const char* ScriptFolders[2] = {"sadx", "shadow"};
+constexpr const char* CatalogPath = Paths::CatalogFile;
+constexpr const char* FolderIconPath = Paths::FolderIcon;
+constexpr const char* ScriptsPath = Paths::ScriptsDir;
+constexpr const char* const* ScriptFolders = GameScriptFolders;
 constexpr const char* SourceScriptsFolder = "Scripts";
 constexpr const char* KindFolders[3] = {"Models", "Textures", "Scripts"};
 constexpr const char* KindLabels[3] = {"MDL", "TEX", "LUA"};
@@ -46,25 +47,25 @@ ImVec4 kindColor(int kind_)
 /* The two hardcoded folders of the external assets, next to the games: Global (every level) and Level (the open level's). */
 const char* externalLabel(int game_)
 {
-	return game_ == 2 ? "Global" : "Level";
+	return game_ == ScopeNav::Global ? "Global" : "Level";
 }
 
 /* Where a game's scripts are in the build's Assets (game 2 = Global's External) and in the source tree, which the build copies over them (CopyScripts, CopyExternal); an edit has to be in both. */
 std::filesystem::path buildScriptRoot(int game_)
 {
-	return game_ == 2 ? std::filesystem::path(Scripting::ExternalScriptsRoot) : std::filesystem::path(ScriptsPath) / ScriptFolders[game_];
+	return game_ == ScopeNav::Global ? std::filesystem::path(Scripting::ExternalScriptsRoot) : std::filesystem::path(ScriptsPath) / ScriptFolders[game_];
 }
 
 std::filesystem::path sourceScriptRoot(int game_)
 {
-	std::filesystem::path root = SF_SOURCE_DIR;
-	return game_ == 2 ? root / "External" / "Scripts" : root / SourceScriptsFolder / ScriptFolders[game_];
+	std::filesystem::path root = Paths::SourceDir;
+	return game_ == ScopeNav::Global ? root / "External" / "Scripts" : root / SourceScriptsFolder / ScriptFolders[game_];
 }
 
 /* The game and the path inside its script root of a script file's path in the build's Assets (Asset::source); false if it is in none of the roots. */
 bool locateScript(const std::string& rSource_, int& rGame_, std::filesystem::path& rRelative_)
 {
-	for(int game = 0; game < 3; game++)
+	for(int game = 0; game <= ScopeNav::Global; game++)
 	{
 		std::filesystem::path relative = std::filesystem::path(rSource_).lexically_relative(buildScriptRoot(game));
 		if(relative.empty() || *relative.begin() == "..") continue;
@@ -125,7 +126,7 @@ void AssetPanel::load()
 	this->loadCatalog();
 	this->loadScripts();
 	this->loadExternal();
-	for(int game = 0; game < 2; game++)
+	for(int game = 0; game < GameSourceCount; game++)
 	{
 		this->sortAndCount(game);
 	}
@@ -168,8 +169,8 @@ void AssetPanel::refreshLevel()
 	/* Per game the keys of the meshes and textures the entities draw, and the script files of their behaviours: those of the level's own entities, and apart those of the entities a script spawned (Scripting::spawnedEntities, the players), which the tiles show in another colour. */
 	struct Used
 	{
-		std::array<std::unordered_set<std::string>, 2> meshes;
-		std::array<std::unordered_set<std::string>, 2> textures;
+		std::array<std::unordered_set<std::string>, GameSourceCount> meshes;
+		std::array<std::unordered_set<std::string>, GameSourceCount> textures;
 		std::unordered_set<std::string> scripts;
 	};
 	Used level;
@@ -182,7 +183,7 @@ void AssetPanel::refreshLevel()
 		{
 			for(PoolId behaviorId : Globals::Game::entityBehaviors[rEntity.behaviorSetId].behaviorIds) rUsed_.scripts.insert(lowerCase(Globals::Game::entityBehaviorTypes[behaviorId].sourceFile));
 		}
-		int game = rEntity.sourceEngine == SA_NINJA ? 0 : rEntity.sourceEngine == STH2005_ONE ? 1 : -1;
+		int game = gameSourceIndex(rEntity.sourceEngine);
 		if(game < 0 || rEntity.instanceId == UninitializedPoolId) return;
 		try
 		{
@@ -210,7 +211,7 @@ void AssetPanel::refreshLevel()
 			}
 		}
 	}
-	for(int game = 0; game < 2; game++)
+	for(int game = 0; game < GameSourceCount; game++)
 	{
 		this->levelCounts[game] = {};
 		for(int kind = 0; kind < KindCount; kind++)
@@ -290,7 +291,7 @@ void AssetPanel::loadCatalog()
 		int game = std::atoi(fields[0].c_str());
 		int kind = std::atoi(fields[1].c_str());
 		int group = std::atoi(fields[2].c_str());
-		if(game < 0 || game > 1 || kind < 0 || kind > 1 || group < 0 || group > 4) continue;
+		if(game < 0 || game >= GameSourceCount || kind < 0 || kind > 1 || group < 0 || group > 4) continue;
 		this->assets[game][kind][group].push_back({fields[3], fields[4]});
 	}
 }
@@ -314,7 +315,7 @@ void AssetPanel::loadScripts()
 			this->assets[game_][Script][0].push_back({relative.filename().generic_string(), it->path().generic_string(), relative.parent_path().generic_string()});
 		}
 	};
-	for(int game = 0; game < 2; game++) scan(fs::path(ScriptsPath) / ScriptFolders[game], game);
+	for(int game = 0; game < GameSourceCount; game++) scan(fs::path(ScriptsPath) / ScriptFolders[game], game);
 	scan(fs::path(Scripting::ExternalScriptsRoot), Global);
 }
 
@@ -926,13 +927,12 @@ void AssetPanel::drawSearch(const std::string& filter_)
 		}
 	}
 
-	const SourceEngineEnum games[2] = {SA_NINJA, STH2005_ONE};
 	ImGui::BeginChild("AssetSearch", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
 	if(this->searchHits.empty()) ImGui::TextUnformatted("No asset matches.");
 	for(int h = 0; h < static_cast<int>(this->searchHits.size()); h++)
 	{
 		const SearchHit& rHit = this->searchHits[h];
-		std::string label = rHit.game >= Global ? externalLabel(rHit.game) : prefabGameFolder(games[rHit.game]);
+		std::string label = rHit.game >= Global ? externalLabel(rHit.game) : prefabGameFolder(GameSources[rHit.game]);
 		label += std::string(" > ") + KindFolders[rHit.kind];
 		if(rHit.game < Global && rHit.kind != Script) label += std::string(" > ") + prefabGroupFolder(static_cast<PrefabGroup>(rHit.group));
 		label += std::format(" ({})", rHit.indices.size());

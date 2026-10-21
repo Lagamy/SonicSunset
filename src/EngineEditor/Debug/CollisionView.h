@@ -19,7 +19,7 @@ with the Default shader, and not part of it: it only reads Globals::Physics and 
   floor-like (normal up) green, ceiling-like blue, steep orange. Uploaded again when the set of level collisions, the color mode or the selection changes; only the grid cells within drawDistance and the camera's frustum are drawn. Depth tested.
 - Entities with a physics: a yellow line from where the collision system's probe starts down to the position, plus a magenta cross at the position.
   Entities with a collision (Entity::collisionId): its object shapes (SADX tables) and its triangle edges, moved by the entity's position (and, for an SADX entity, turned by its rotation); a shape is colored by its raw attribute value like the level's triangles (colorByAttribute, listed in `entityAttributes`), the triangle edges and all shapes without that mode cyan. Rebuilt every frame and
-  drawn without depth test, so they show through the level.
+  depth tested like the level's lines, so the scene hides them.
 - markers: a cross at each position in world space, colored by its value like the attribute view (equal values share a color), for placed objects that have no model (Level::setONEEntities)
   or for checking where objects are (DebugSetup). Filled by the caller, drawn every frame without depth test, also while `enabled` is off; the debug UI lists the labels with their colors.
 */
@@ -46,7 +46,7 @@ struct CollisionView
 	std::vector<Marker> markers;
 
 	/*
-	One distinct triangle value (attribute or piece flags) of the shown level collisions: its raw value, how many triangles have it, its line color and the name of the behaviour the collision's remap gives it
+	One distinct triangle value (attribute or piece flags) of the shown level collisions: its raw value, how many triangles have it, its line color the name of the behaviour and the tags of their own the collision's remap gives it
 	(External/Collision/Remaps.json; "?" if it has none). Most common first.
 	*/
 	struct AttributeCount
@@ -55,6 +55,8 @@ struct CollisionView
 		uint32_t count;
 		glm::vec4 color;
 		std::string behavior = "?";
+		/* The tags the value has of its own besides the behaviour's (Physics::Collision::tagsByValue). */
+		std::vector<PoolId> tags;
 	};
 	std::vector<AttributeCount> attributes;
 
@@ -86,7 +88,13 @@ struct CollisionView
 	void selectEntityAttribute(int step_);
 	void destroy();
 
+	/* The reason the last behaviour change in the Level sub tab failed (shown in red there), empty if it did not. */
+	std::string remapError;
+
 private:
+	/* Gives the raw triangle value value_ the behaviour behavior_ and the tags tags_ (besides the behaviour's) in the remap of every shown level's game (saved to Remaps.json) and in the shown collisions, and updates `attributes`. Sets remapError instead of throwing. */
+	void setLevelValueBehavior(uint32_t value_, PoolId behavior_, const std::vector<PoolId>& tags_);
+
 	struct LineVertex
 	{
 		glm::vec3 position;

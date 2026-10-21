@@ -17,7 +17,6 @@
 #include "SpatialIndex.h"
 #include "EntityState.h"
 #include "GameEvents.h"
-#include "GCDisc.h"
 #include "Pool.h"
 #include "PoolMap.h"
 #include "Collision.h"
@@ -103,12 +102,6 @@ namespace Globals {
 		External (the per-character record of _Main.rel, Sonic's +0x78 = 0.08 per frame squared): 0.08 * 60 * 60, assuming 1 frame = 1/60 s (hypothesis).
 		*/
 		inline glm::vec3 gravity = glm::vec3(0.0f, -288.0f, 0.0f);
-	}
-
-	/* The opened disc images, kept open so resources can be loaded on demand from resource keys. */
-	namespace Discs {
-		inline GameCube::GCDisc sadx;
-		inline GameCube::GCDisc shadow;
 	}
 
 	namespace Mouse { 
