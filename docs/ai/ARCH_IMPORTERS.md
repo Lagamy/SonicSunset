@@ -1,7 +1,7 @@
 # Architecture: importers (compact)
 Part of the ARCHITECTURE twin set (index: `docs/ai/ARCHITECTURE.md`). Human source: `docs/ARCHITECTURE.md` (= ARCH; grep it for detail). Tags: E external, O observed (user), H hypothesis.
 
-## Importers (bytes in, throw runtime_error outside support, evidence in comments, no asset names inside: names come from keys)
+## Importers (live in the IluminationEngine repo since 2026-10-22: `IluminationEngine/src/Importers/<family>`, CMake options ILLUMINATION_FORMAT_SADX/_STH2005/_DMC3; bytes in, throw runtime_error outside support, evidence in comments, no asset names inside: names come from keys)
 - GCDisc (FST, `readFile`); Rel (relocate: pointers = file offsets; SaComp first); SaComp (LZ77 of 20 SADX rels, E X-Hax).
 - SALandTable (COL pieces, flags, sphere, texlist; animated parts unread). SASet (`readSAPlacements`: count + header to 0x20, 32 B records u16 type (low 12 bits type, top 4 flags unknown), s16 rot[3] BAMS, f32 pos[3], f32 scale[3] = per-object params).
 - SAMdl (`importSAModel`, Ninja Basic, vertex per corner, UV/255, `texture id & 0xFFFF`, bit 0x800000 double-sided H, NPoly as strip O; normals/colors/material colors unread). SAMotion (NJS_MOTION linear only). Gvm (flags 0xF, CMPR + RGB5A3, mip 0).

@@ -60,6 +60,12 @@ inline const char* prefabGameFolder(SourceEngineEnum game_)
 	return game_ == SA_NINJA ? "Sonic Adventure Director's Cut" : "Shadow The Hedgehog 2005";
 }
 
+/* The Remaps.json section whose remap gives the triangle values of a level of this engine their behaviours (the editor's collision view changes it; glTF levels use the SADX one). */
+inline const char* levelRemapSection(SourceEngineEnum game_)
+{
+	return game_ == STH2005_ONE ? "ShadowLevel" : "SADXLevel";
+}
+
 /* The disc model name Entity::setDiscMesh takes for the model the editor's choice names (MeshChoice::name): a Shadow archive's models are named "(mesh)/<entry>" there. */
 inline std::string gameDiscMeshName(SourceEngineEnum game_, const std::string& rName_)
 {

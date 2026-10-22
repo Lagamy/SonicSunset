@@ -83,7 +83,7 @@ Not done: the icon's spin (the +0x30 turn above) and the pickup behaviour are no
 ## Where in the code
 
 - `tools/genSAEntityKeys.py`: `VARIANT_MODELS`, `VARIANT_FIELD`, `VARIANT_COLLISIONS` (O PIER, O PARASOL), `NO_MODEL` (O BEWIND).
-- `src/Keys/SAKeys.h`: `SAEntityKey::variantModels / variantCollisions` (the picking field is `Prefab::variantField`, `External/Prefabs/SADX/Placement.json`) and `iconTextures` (O ITEMBOX: `Entity::setSAIcon`, `SAInstance::iconNode`).
-- `src/Objects/Level.cpp`: `Level::setSAEntities` (SET records only; the stage's own entities come from the level file's `source`).
+- `IluminationEngine/src/Keys/SAKeys.h`: `SAEntityKey::variantModels / variantCollisions` (the picking field is `Prefab::variantField`, `External/Prefabs/SADX/Placement.json`) and `iconTextures` (O ITEMBOX: `Entity::setSAIcon`, `SAInstance::iconNode`).
+- `IluminationEngine/src/Objects/Level.cpp`: `Level::setSAEntities` (SET records only; the stage's own entities come from the level file's `source`).
 - `src/ResourceKeys.h`: the four `EmeraldCoastBridge*` keys (no positions).
 - `Levels/EmeraldCoast/EmeraldCoast.json`: the `source.added` list.

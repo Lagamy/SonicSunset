@@ -1,6 +1,6 @@
 """
 Generates Catalog/AssetCatalog.tsv from ResourceMap.txt: the models and textures of the two discs, one row each, for the
-editor's Assets tab (src/EngineEditor/Panels/AssetPanel.cpp, loaded from Assets/Catalog/AssetCatalog.tsv, copied there by CMake).
+editor's Assets tab (IluminationEngine/src/EngineEditor/Panels/AssetPanel.cpp, loaded from Assets/Catalog/AssetCatalog.tsv, copied there by CMake).
 
 Run from anywhere:  python3 tools/genAssetCatalog.py        (run tools/genResourceMap.py first if ResourceMap.txt is old)
 Add --ai to print only the counts per game, kind and group.
@@ -14,7 +14,7 @@ Models are the Ninja models and land tables of the .rel modules and the .DFF ent
 .dff files; textures are the .GVM/.GVR files and the .TXD entries plus the loose .txd/.png files. Everything else
 (animations, bones, collision, audio, ...) is left out.
 
-Every group is a hypothesis made from names (the same idea as groupOf in src/Objects/Prefab.cpp, whose name sets are
+Every group is a hypothesis made from names (the same idea as groupOf in IluminationEngine/src/Objects/Prefab.cpp, whose name sets are
 copied below); nothing was checked in the engine.
 """
 import collections, os, re, sys

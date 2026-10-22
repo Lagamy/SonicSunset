@@ -594,7 +594,7 @@ namespace Loading
         }
         eraseRelModuleIfUnused(rLandTable_.rel);
         collision.computeBounds();
-        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remapSADXLevel);
+        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remap("SADXLevel"));
         return Globals::Physics::collisions.add(std::move(collision));
     }
 
@@ -621,7 +621,7 @@ namespace Loading
             }
             eraseRelModuleIfUnused(rKey.rel);
         }
-        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remapSADXShape);
+        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remap("SADXShape"));
         return Globals::Physics::collisions.add(std::move(collision));
     }
 
@@ -639,7 +639,7 @@ namespace Loading
             throw;
         }
         eraseRelModuleIfUnused(rShapes_.rel);
-        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remapSADXShape);
+        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remap("SADXShape"));
         return Globals::Physics::collisions.add(std::move(collision));
     }
 
@@ -653,7 +653,7 @@ namespace Loading
         Physics::Collision collision;
         collision.shapes = STH2005::readCCL(archive.readFile(rShapes_.entry));
         collision.name = rShapes_.entry;
-        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remapShadowShape);
+        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remap("ShadowShape"));
         return Globals::Physics::collisions.add(std::move(collision));
     }
 
@@ -670,7 +670,7 @@ namespace Loading
             collision.shapes.insert(collision.shapes.end(), shapes.begin(), shapes.end());
             collision.name += std::format("{}{}", collision.name.empty() ? "" : ", ", rKey.entry);
         }
-        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remapShadowShape);
+        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remap("ShadowShape"));
         return Globals::Physics::collisions.add(std::move(collision));
     }
 
@@ -697,7 +697,7 @@ namespace Loading
             }
         }
         collision.computeBounds();
-        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remapShadowLevel);
+        Globals::Game::baBehaviors.resolve(collision, Globals::Game::baBehaviors.remap("ShadowLevel"));
         return Globals::Physics::collisions.add(std::move(collision));
     }
 

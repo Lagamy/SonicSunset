@@ -4,7 +4,7 @@ How to use the engine as it is: load a level, describe a level in JSON, add a le
 
 ## Loading a level
 
-Levels are made in one place: `Loading::loadLevel(name)` (`src/Loading/LevelLoader.cpp`). From Lua:
+Levels are made in one place: `Loading::loadLevel(name)` (`IluminationEngine/src/Loading/LevelLoader.cpp`). From Lua:
 
 ```lua
 local level = sf.loadLevel("EmeraldCoast")   -- or "Stg0100", "Stg0000"; returns the level handle
@@ -100,7 +100,7 @@ The glTF is read once, at import (File > New level, File > Swap level model, Fil
 - `Models/<Name>_<cx>_<cz>_<k>.chunk.model.json/.bin`: the visual cut into chunks (`Loading/GLTFImport.*`). A triangle goes to the XZ grid cell (`ChunkCellSize` 256, metres of the glTF; a guess) its centroid is in; a cell with more than `MaxChunkTriangles` (65536) is split in halves at the median along its longer side (`k` numbers the parts). A chunk is a standard `ModelFile` with one submesh per texture and its own bounds; triangles are never cut, so a chunk can reach past its cell. `<Name>_tex<i>.png` (+ `.png.json`) next to them are the images the materials use. `scanExternalAssets` skips `*.chunk.model.json`.
 - `Collision/<name>.collision.json/.bin` (`Importers/External/CollisionFile.*`): header `version` 1, `name`, `vertexCount`, `triangleCount`, `hasTriangleValues`, `pieces` [{flags, center, radius, firstTriangle, triangleCount}]; bin little-endian: `vertexCount` x 3 float32, `triangleCount` x 3 u32 indices, then (if `hasTriangleValues`) `triangleCount` u32 attributes. A glTF import has one piece per primitive, flags 0, no per-triangle values. `triangleMaterials` is not stored. Collision is not chunked: the collision quad tree already splits the level's triangles in XZ and is rebuilt whole.
 
-`model`, `placementFiles`, `entityTable`, `typeNames` are not read (New level's model and collision paths are import inputs only). A glTF level has no entities of its own (add prefabs in the editor; they are saved as `edits.added`). Every node with a mesh is imported with its world transform applied; only triangle lists are read. The glTF's space is kept (Y up, metres). The visual is drawn with vertex colour (COLOR_0 times baseColorFactor) and the base colour texture; the level reads the PNGs into `Graphics::textures` (`<Name> <file stem>`) and removes them with the level. Every collision triangle is Solid (the `SADXLevel` remap's fallback, `External/Collision/Remaps.json`), two sided. Its shader is `GLTF` (the form's default; `Shaders/GLTF`): unlit, vertex colour linear. Loading reads only these files (no external-asset scan), so it works without `EDITOR`; the import is `EDITOR` only. Reader of the glTF: `Importers/External/GLTFFile.*` (cgltf 1.15).
+`model`, `placementFiles`, `entityTable`, `typeNames` are not read (New level's model and collision paths are import inputs only). A glTF level has no entities of its own (add prefabs in the editor; they are saved as `edits.added`). Every node with a mesh is imported with its world transform applied; only triangle lists are read. The glTF's space is kept (Y up, metres). The visual is drawn with vertex colour (COLOR_0 times baseColorFactor) and the base colour texture; the level reads the PNGs into `Graphics::textures` (`<Name> <file stem>`) and removes them with the level. Every collision triangle is Solid (the fallback of the remap section `levelRemapSection(GLTF_FILE)` names, `External/Collision/Remaps.json`), two sided. Its shader is `GLTF` (the form's default; `Shaders/GLTF`): unlit, vertex colour linear. Loading reads only these files (no external-asset scan), so it works without `EDITOR`; the import is `EDITOR` only. Reader of the glTF: `Importers/External/GLTFFile.*` (cgltf 1.15).
 
 Editor, File menu (glTF levels only): **Swap level model...** (path box) replaces the chunks and the live visual; **Swap collision** has a side menu: **Add collision file...** (path box; appended to the live collision and to `collisions`, quad tree rebuilt) and the level's collision files with the ones in use ticked; picking one asks for a `.gltf`/`.glb` path and overwrites that collision file with the new file's triangles (same name; the live collision is rebuilt if the file is in use).
 
@@ -124,7 +124,7 @@ Where the two players' resources are: `Assets/External/Players/Sonic.json` and `
 
 ## Adding a game
 
-A new `"engine"` string (`"gltf"` was added this way: `fillGLTF`, `Level::setGLTFGPUInstance` / `setGLTFCollision`, `GLTF_FILE` in `SourceEngineEnum`): add a `fill<Engine>` function (JSON to key, strings kept in the `Recipe`) and a branch in `readRecipe` and `loadLevel` of `LevelLoader.cpp`, plus the `Level` methods for its instance, collision and entities (`src/Objects/Level.*`).
+A new `"engine"` string (`"gltf"` was added this way: `fillGLTF`, `Level::setGLTFGPUInstance` / `setGLTFCollision`, `GLTF_FILE` in `SourceEngineEnum`): add a `fill<Engine>` function (JSON to key, strings kept in the `Recipe`) and a branch in `readRecipe` and `loadLevel` of `LevelLoader.cpp`, plus the `Level` methods for its instance, collision and entities (`IluminationEngine/src/Objects/Level.*`).
 
 ## Limits
 

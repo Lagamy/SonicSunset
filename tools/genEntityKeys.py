@@ -7,7 +7,7 @@ Inputs: build/Disks/Shadow2005.iso (the disc file table, .ONE and PRS through to
 
 Where each fact comes from (external: the Ghidra decompile of main.dol and the files of the disc; the layouts are decoded from the files):
 - Object type ids and names: the registry of main.dol, a null terminated array of descriptor pointers at 0x8052B080 (REGISTRY_ADDRESS); a descriptor's
-  first word points at its name (0 in two descriptors, ids 24 and 57, which are named UnnamedNN here), and the u16 in the high half of its word at +0x18 is the id (the ids a stage's placement files use, see src/Importers/STH2005/Placement.cpp).
+  first word points at its name (0 in two descriptors, ids 24 and 57, which are named UnnamedNN here), and the u16 in the high half of its word at +0x18 is the id (the ids a stage's placement files use, see IluminationEngine/src/Importers/STH2005/Placement.cpp).
 - .BIN (an entry of a gdt archive, one per object kind): the same relocatable container as a .CCL (u32 size, u32 A = size of section 1, u32 B, u32 1, u32 0, u32 0x3142, ...,
   section 1 from 0x20, big-endian, pointers are offsets into section 1). It starts with four {pointer, count} pairs: models, infos, motions, collisions.
   An info is 16 bytes (name, pointer to a list, 0, count) and the model table follows the infos. A model is 64 bytes: name, .DFF, .UVA (0 = none), ...; the
@@ -20,7 +20,7 @@ Where each fact comes from (external: the Ghidra decompile of main.dol and the f
 - An info is a variant: the BIN's models it lists, by name (Placement.json holds their indices into the key's models, children attached to another model left out). The first info is what an object is made of by default
   (observed: CAPTURECAGE's info 'cage' lists CAPTCAGE.DFF and CAPTCAGE1.DFF, the bars); the BINs in VARIANT_STEMS pick the info by the record.
 - Motions: a motion entry naming an .MTP gives one MotionKey per motion of that .MTP (names read from its table, the entry's .BON); one naming an .MTN gives one (a .MTN is a single
-  motion, see src/Importers/STH2005/Mtp.cpp), named after the file.
+  motion, see IluminationEngine/src/Importers/STH2005/Mtp.cpp), named after the file.
 
 Which BIN an object type uses is not stored anywhere that was found: the BIN is the type's name in capitals without underscores and spaces (RING, SPRING, Helicopter ->
 HELICOPTER), or the entry of NAME_OVERRIDES (below), written from the names alone: hypothesis. A type with no BIN (enemies, particles, invisible objects) is skipped
@@ -58,7 +58,7 @@ NAME_OVERRIDES = {
 # BINs whose textures are in another archive than their models' (stem -> the archive whose STG_GDT.TXD to use): FRUIT's JG0404BKFRUIT.DFF names s0404_nn022, which the common and stg0100's
 # STG_GDT.TXD lack and the ones of stages 0301, 0404 and 0603 have (observed); the model is named after stage 0404, so that one (hypothesis: where the game finds the texture is unknown).
 TEXTURE_ARCHIVES = {"FRUIT": "stg0404/stg0404_gdt.one"}
-# BINs whose objects are laid out as a ring line ("RingLine" in Placement.json, see src/Importers/STH2005/RingLine.cpp: from the decompile of the RING factory).
+# BINs whose objects are laid out as a ring line ("RingLine" in Placement.json, see IluminationEngine/src/Importers/STH2005/RingLine.cpp: from the decompile of the RING factory).
 RING_LINE_STEMS = {"RING"}
 # BINs whose objects pick their models by the placement's first parameter ("Variant" in Placement.json): observed on ARTISTGADGET, whose 83 stg0100 records have a u32 of 0 to 19 there and the BIN
 # has 27 infos named after street objects (hypothesis: the index of the info; not checked for the other ART BINs).
@@ -177,12 +177,12 @@ def parse_bin(name, d):
 
 
 def bon_nodes(d):
-    """[(HAnim id, name)] of a .BON (layout of src/Importers/STH2005/Bon.cpp: u16 node count at 0x0A, 0x70 byte records from 0x30, id first, name in the last 32 bytes)."""
+    """[(HAnim id, name)] of a .BON (layout of IluminationEngine/src/Importers/STH2005/Bon.cpp: u16 node count at 0x0A, 0x70 byte records from 0x30, id first, name in the last 32 bytes)."""
     return [(be(d, 0x30 + 0x70 * i), d[0x30 + 0x70 * i + 0x50:0x30 + 0x70 * i + 0x70].split(b"\0")[0].decode("latin1")) for i in range(be(d, 0x0A, ">H"))]
 
 
 def mtp_names(d):
-    """The motion names of a .MTP (layout of src/Importers/STH2005/Mtp.cpp: u16 count at 2, table offset at 0x10, 12 byte entries starting with the name's offset)."""
+    """The motion names of a .MTP (layout of IluminationEngine/src/Importers/STH2005/Mtp.cpp: u16 count at 2, table offset at 0x10, 12 byte entries starting with the name's offset)."""
     count, table = be(d, 2, ">H"), be(d, 0x10)
     names = []
     for i in range(count):

@@ -1,4 +1,4 @@
-"""Decompress a SADX GameCube .rel (SaCompGC, same algorithm as src/Importers/GameCube/SaComp.cpp) from the disc and print its header,
+"""Decompress a SADX GameCube .rel (SaCompGC, same algorithm as IluminationEngine/src/Importers/GameCube/SaComp.cpp) from the disc and print its header,
 sections and relocation statistics. Usage: relTool.py <disc path> <out file>"""
 import struct, sys, collections
 

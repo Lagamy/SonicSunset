@@ -8,7 +8,7 @@ Run from anywhere:  python3 tools/dumpCCL.py [outDir]      writes <outDir>/<arch
 Reads the disc only; the only files written are the .ccl dumps into outDir.
 
 The disc file table, the "One Ver 0.60" layout and PRS are the same as in tools/genResourceMap.py and
-src/Importers/STH2005/ONE.cpp / Prs.cpp (a port of them; the "One Ver 0.50" archives are skipped).
+IluminationEngine/src/Importers/STH2005/ONE.cpp / Prs.cpp (a port of them; the "One Ver 0.50" archives are skipped).
 """
 import os, struct, sys
 
