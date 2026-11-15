@@ -27,4 +27,6 @@ namespace Loading
     void changeSAMesh(PoolId saInstanceId_, const SAModelKey& rMesh_);
     void changeSATextureSet(PoolId saInstanceId_, const SATextureSetKey* pTextures_);
     void releaseSAMotion(PoolId saMotionId_);
+    /* Lets HubWorld.bin's face textures use the textures of the discs (MeshDiff.h, discTextureTiles); called once the discs are open. */
+    void registerDiscFaceTextures();
 }

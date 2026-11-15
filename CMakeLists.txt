@@ -66,6 +66,16 @@ illumination_copy_directory(CopyLevels SonicSunset ${CMAKE_CURRENT_SOURCE_DIR}/L
 # The HubWorld (HubWorld.json: where each level sits in the one space, read by HubWorld::read) is copied to Assets/HubWorld.json.
 illumination_copy_file(CopyHubWorld SonicSunset ${CMAKE_CURRENT_SOURCE_DIR}/HubWorld.json HubWorld.json)
 
+# The HubWorld's geometry edits (HubWorld.bin, made by the editor's Geometry subtab, read by HubWorld::read) are copied the same way once the file exists.
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/HubWorld.bin)
+	illumination_copy_file(CopyHubWorldEdits SonicSunset ${CMAKE_CURRENT_SOURCE_DIR}/HubWorld.bin HubWorld.bin)
+endif()
+
+# The collision edits (HubWorld.collision.bin, made by the editor's Collision subtab) the same way.
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/HubWorld.collision.bin)
+	illumination_copy_file(CopyHubWorldCollisionEdits SonicSunset ${CMAKE_CURRENT_SOURCE_DIR}/HubWorld.collision.bin HubWorld.collision.bin)
+endif()
+
 # The asset catalog (Catalog/, made by tools/genAssetCatalog.py, read by the editor's Assets tab) is copied to Assets/Catalog the same way.
 illumination_copy_directory(CopyCatalog SonicSunset ${CMAKE_CURRENT_SOURCE_DIR}/Catalog Catalog)
 

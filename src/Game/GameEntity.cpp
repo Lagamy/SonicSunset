@@ -345,7 +345,7 @@ bool Entity::instancePosed() const
 	return this->sourceEngine == SA_NINJA && !Graphics::getSAInstance(this->instanceId).nodePose.empty();
 }
 
-void Entity::instanceMeshes(std::vector<std::pair<const Graphics::BasicMesh*, glm::mat4>>& rMeshes_) const
+void Entity::instanceMeshes(std::vector<std::pair<const Graphics::BasicMesh*, glm::mat4>>& rMeshes_, bool rest_) const
 {
 	if(this->sourceEngine == SA_NINJA)
 	{
@@ -353,7 +353,7 @@ void Entity::instanceMeshes(std::vector<std::pair<const Graphics::BasicMesh*, gl
 		const Graphics::SAMesh& rMesh = Graphics::saMeshes[rInstance.saMeshId];
 
 		/* The pose of the last drawn frame places the nodes when there is one (it overrides each node's localTransform). */
-		bool usePose = rInstance.nodePose.size() == rMesh.nodes.size();
+		bool usePose = !rest_ && rInstance.nodePose.size() == rMesh.nodes.size();
 		std::vector<glm::mat4> world(rMesh.nodes.size());
 		for(size_t i = 0; i < rMesh.nodes.size(); i++)
 		{
@@ -375,6 +375,38 @@ void Entity::instanceMeshes(std::vector<std::pair<const Graphics::BasicMesh*, gl
 			for(const Graphics::RenderWareSubmesh& rSubmesh : rAtomic.submeshes) rMeshes_.push_back({&rSubmesh.mesh, world[rAtomic.frame]});
 		}
 	}
+}
+
+std::string Entity::instanceMeshTexture(const Graphics::BasicMesh* pMesh_) const
+{
+	std::string set = this->discTexture();
+	if(set.empty()) return std::string();
+	if(this->sourceEngine == SA_NINJA)
+	{
+		const Graphics::SAInstance& rInstance = Graphics::getSAInstance(this->instanceId);
+		const Graphics::TextureSet& rSet = Graphics::textureSets[rInstance.textureSetId];
+		for(const Graphics::SANode& rNode : Graphics::saMeshes[rInstance.saMeshId].nodes)
+		{
+			for(const Graphics::SASubmesh& rSubmesh : rNode.submeshes)
+			{
+				if(&rSubmesh.mesh != pMesh_) continue;
+				if(rSubmesh.textureIndex == Graphics::SANoTexture || rSubmesh.textureIndex >= rSet.names.size()) return std::string();
+				return std::format("disc:{}#{}", set, rSet.names[rSubmesh.textureIndex]);
+			}
+		}
+	}
+	else if(this->sourceEngine == STH2005_ONE)
+	{
+		const Graphics::ONEInstance& rInstance = Graphics::getONEInstance(this->instanceId);
+		for(const Graphics::RenderWareAtomic& rAtomic : Graphics::oneArchives[rInstance.archiveId].meshes[rInstance.meshIndex].atomics)
+		{
+			for(const Graphics::RenderWareSubmesh& rSubmesh : rAtomic.submeshes)
+			{
+				if(&rSubmesh.mesh == pMesh_) return rSubmesh.textureName.empty() ? std::string() : std::format("disc:{}#{}", set, rSubmesh.textureName);
+			}
+		}
+	}
+	return std::string();
 }
 
 void Entity::drawInstance()

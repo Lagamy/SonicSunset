@@ -1,6 +1,8 @@
 -- Startup of the game (main.cpp runs it once the discs are open and the shaders exist, after main.lua): which level is loaded and which players stand in it, and the L key that switches to the next level while running.
 -- START is the level at startup. Each level has a camera start and a start position per player (observed or placeholders, as they were in main.cpp).
 local START = "EmeraldCoast"
+-- true = the app starts with the HubWorld loaded (HubWorld.json, as File > Load HubWorld: its first level is active, or none when the file is empty); false = START alone.
+local START_AS_HUB = true
 
 local ORDER = {"EmeraldCoast", "Stg0100"}
 local LEVELS = {
@@ -23,6 +25,11 @@ local CHARACTERS = {"sonic", "shadow"}
 local current = START
 local level = sf.none
 local players = {}
+
+-- An empty HubWorld (File > Load HubWorld with no levels in HubWorld.json) has no level: there is nothing to unload.
+local function unloadCurrent()
+	if level ~= sf.none then sf.unloadLevel(level) end
+end
 
 -- Experimental: the ground snap also depends on the game the loaded level belongs to. A character in a level of its own game keeps the snap its script sets. In a level of the other game the behaviour GroundSnap is given to it (once, on
 -- the level load that needs it) and applies that game's snap mode after the character's own behaviour every tick (sf.setGroundSnapMode: a field left out keeps the character's value). Hypothesis, not observed: the other game's
@@ -66,7 +73,7 @@ local function enter(name, hub)
 	hubMode = hub == true
 	if hub then
 		level = sf.loadHubWorld(name)
-		name = sf.levelName(level)
+		if level ~= sf.none then name = sf.levelName(level) end
 	else
 		level = sf.loadLevel(name)
 	end
@@ -94,7 +101,7 @@ local unloading = false
 local pending = nil
 sf.behavior("LevelSwitch", function(entity)
 	if unloading then
-		if sf.levelExists(level) then return end
+		if level ~= sf.none and sf.levelExists(level) then return end
 		unloading = false
 		if pending ~= nil then
 			local request = pending
@@ -110,7 +117,7 @@ sf.behavior("LevelSwitch", function(entity)
 		return
 	end
 	if pending ~= nil then
-		sf.unloadLevel(level)
+		unloadCurrent()
 		unloading = true
 		return
 	end
@@ -118,7 +125,7 @@ sf.behavior("LevelSwitch", function(entity)
 	local switch = lPressed and not lHeld
 	lHeld = lPressed
 	if switch then
-		sf.unloadLevel(level)
+		unloadCurrent()
 		unloading = true
 	end
 end)
@@ -132,7 +139,7 @@ end
 -- The engine's reset (the editor's Stop and File > Load level / Load HubWorld, Scripting::resetGame): first call, the level is asked to go; second call, it is gone, so the same level (or the one named, a file of Levels/) is loaded with its objects and the players at its start. mode is "level" or "hub" (File > Load HubWorld); nil keeps the kind of the last load.
 function resetGame(unloaded, name, mode)
 	if not unloaded then
-		sf.unloadLevel(level)
+		unloadCurrent()
 		return
 	end
 	unloading = false
@@ -148,5 +155,5 @@ function resetGame(unloaded, name, mode)
 	resetPlayers()
 end
 
-enter(START)
+if START_AS_HUB then enter(nil, true) else enter(START) end
 sf.give(players[1], "LevelSwitch")

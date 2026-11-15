@@ -15,11 +15,14 @@
 #include "ONEInstance.h"
 #include "CollisionFile.h"
 #include "ModelFile.h"
+#include "MeshDiff.h"
 #include "TextureFile.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <format>
 #include <stdexcept>
 #include <string>
@@ -750,5 +753,51 @@ namespace Loading
         }
         oneArchives[archiveId].users++;
         return oneInstances.add(ONEInstance{archiveId, shaderId_, meshIndex, dictionaryIndex, bindingIndex});
+    }
+
+    /*
+    The tiles of a disc set for the face textures of HubWorld.bin (MeshDiff.h, discTextureTiles). A name ending in .TXD is a Shadow entry: it is decoded in the first loaded archive that has an entry of that name (the level's own, as the
+    pieces of a Shadow level come from it; hypothesis: the same entry name is not in two loaded archives), and stays as long as that archive does. Anything else is a SADX .GVM path: its set is loaded and counted as used once more, forever, so
+    nothing frees the textures a face may be drawn with. Order: the set's own for a .GVM, by name for a .TXD.
+    */
+    static std::vector<DiscTextureTile> discSetTiles(const std::string& rSet_)
+    {
+        std::vector<DiscTextureTile> tiles;
+        try
+        {
+            if(rSet_.size() > 4 && (rSet_.ends_with(".TXD") || rSet_.ends_with(".txd")))
+            {
+                for(size_t i = 0; i < oneArchives.allocatedSize(); i++)
+                {
+                    if(!oneArchives.alive[i]) continue;
+                    STH2005::ONE& rArchive = oneArchives.getInternal(i);
+                    bool has = std::any_of(rArchive.entries.begin(), rArchive.entries.end(), [&](const STH2005::ONEEntry& rEntry_) { return rEntry_.name == rSet_; });
+                    if(!has) continue;
+                    const Renderware::TxdTextures& rDictionary = rArchive.textureDictionaries[rArchive.useTextureDictionary(rSet_.c_str())];
+                    for(const auto& [rName, id] : rDictionary.byName) tiles.push_back({rName, &textures[id]});
+                    std::sort(tiles.begin(), tiles.end(), [](const DiscTextureTile& rA_, const DiscTextureTile& rB_) { return rA_.name < rB_.name; });
+                    break;
+                }
+                return tiles;
+            }
+            static std::set<std::string> pinned;
+            bool created = false;
+            SATextureSetKey key{rSet_.c_str()};
+            PoolId setId = findOrLoadTextureSet(key, created);
+            if(pinned.insert(rSet_).second) textureSets[setId].users++;
+            const TextureSet& rSet = textureSets[setId];
+            for(size_t i = 0; i < rSet.ordered.size() && i < rSet.names.size(); i++) tiles.push_back({rSet.names[i], &textures[rSet.ordered[i]]});
+        }
+        catch(const std::exception& rError)
+        {
+            fprintf(stderr, "Face texture set '%s' not read: %s\n", rSet_.c_str(), rError.what());
+            tiles.clear();
+        }
+        return tiles;
+    }
+
+    void registerDiscFaceTextures()
+    {
+        discTextureTiles = discSetTiles;
     }
 }

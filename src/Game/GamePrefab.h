@@ -33,6 +33,12 @@ enum class PrefabKind
 
 inline constexpr PrefabKind DefaultPrefabKind = PrefabKind::SAObject;
 
+/* Whether a prefab of this kind is a playable character (the editor doesn't copy those). */
+inline constexpr bool isPlayerPrefabKind(PrefabKind kind_)
+{
+	return kind_ == PrefabKind::SonicPlayer || kind_ == PrefabKind::ShadowPlayer;
+}
+
 /*
 One rotation of an SADX object's display code (see Prefab::rotation): about axis ('X', 'Y' or 'Z') by the task's angle `field` (0 x, 1 y, 2 z, in BAMS), negated if negate, plus addend. A step with
 field 3 uses no angle: it turns by addend alone.

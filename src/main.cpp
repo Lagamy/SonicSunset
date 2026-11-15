@@ -19,6 +19,7 @@
 #include "DebugSetup.h"
 #include "LevelLoader.h"
 #include "PlayerLoader.h"
+#include "GameLoaders.h"
 #ifdef EDITOR
 #include "Editor.h"
 #include "ExternalPrefabs.h"
@@ -127,6 +128,7 @@ int main() {
 	*/
 	Globals::Discs::sadx = GameCube::openGCDisc(sadxDiscPath.c_str());
 	Globals::Discs::shadow = GameCube::openGCDisc(shadowDiscPath.c_str());
+	Loading::registerDiscFaceTextures();
 
 	/* The level and the players are the script game.lua's (it needs the discs and shaders above). */
 	Scripting::loadFile("game.lua");
