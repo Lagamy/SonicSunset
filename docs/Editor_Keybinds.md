@@ -77,7 +77,7 @@ Ctrl is the merge key here, so undo/redo/save use **Shift**.
 |---|---|
 | Left click | Pick (replaces the selection) |
 | Shift + left click | Toggle in the selection |
-| Ctrl + left click | Add to the selection (not while extruding, not in Create's Vertex mode) |
+| Ctrl + left click | Add to the selection (Transform and Faces tabs; the Create tab has no picking) |
 | Left drag | Box pick (Shift or Ctrl adds) |
 | Right click | Take one out of the selection |
 | Right drag | Take everything in the box out |
@@ -90,10 +90,11 @@ Ctrl is the merge key here, so undo/redo/save use **Shift**.
 |---|---|
 | Left click on a vertex | Start a triangle; further clicks add corners (empty space makes a new vertex; Shift on the third goes on from it) |
 | Right click | Step back one corner; cancel the pending extrusion or the picked vertex / edge |
-| E | Extrude the picked edge (or two picked vertices) as a Triangle or a Quad |
+| E (or Ctrl + E) | Edge / Face mode: extrude the edge nearest the cursor (light red) as a Triangle or a Quad |
+| Tab | While a chained extrusion is pending: start it from the next outer side of the last made faces |
 | \ | Switch Triangle / Quad (pending extrusions are made again in the new kind) |
-| Enter | Make the faces of the pending extrusions (with none: a triangle from three picked vertices) |
-| Q / Esc | Deselect / discard (see above) |
+| Enter | Make the faces of the pending extrusion and start the next one from the nearest new side (Esc or right click stops) |
+| Q / Esc | Drop an unfinished triangle / discard (the Create tab has no selection) |
 
 ### Texturing window
 
