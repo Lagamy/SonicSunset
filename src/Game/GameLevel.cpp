@@ -330,6 +330,40 @@ void Level::drawInstance(const glm::mat4& rBase_, const Camera& rCamera_)
 	}
 }
 
+unsigned int Level::instanceMeshTexture(const Graphics::BasicMesh* pMesh_) const
+{
+	if(this->instanceId == UninitializedPoolId) return 0;
+	if(this->sourceEngine == SA_NINJA)
+	{
+		for(const Graphics::SALevelPiece& rPiece : Graphics::getSALevelInstance(this->instanceId).pieces)
+		{
+			const Graphics::SAInstance& rInstance = Graphics::getSAInstance(rPiece.saInstanceId);
+			if(rInstance.textureSetId == UninitializedPoolId) continue;
+			const Graphics::TextureSet& rSet = Graphics::textureSets[rInstance.textureSetId];
+			for(const Graphics::SANode& rNode : Graphics::saMeshes[rInstance.saMeshId].nodes)
+			{
+				for(const Graphics::SASubmesh& rSubmesh : rNode.submeshes)
+				{
+					if(&rSubmesh.mesh != pMesh_) continue;
+					if(rSubmesh.textureIndex == Graphics::SANoTexture || rSubmesh.textureIndex >= rSet.ordered.size()) return 0;
+					return Graphics::textures[rSet.ordered[rSubmesh.textureIndex]].textureId;
+				}
+			}
+		}
+	}
+	else if(this->sourceEngine == STH2005_ONE)
+	{
+		for(const Graphics::ONELevelPiece& rPiece : Graphics::getONELevelInstance(this->instanceId).pieces)
+		{
+			for(const Graphics::ONELevelSubmesh& rSubmesh : rPiece.submeshes)
+			{
+				if(&rSubmesh.mesh == pMesh_) return rSubmesh.textureId == UninitializedPoolId ? 0 : Graphics::textures[rSubmesh.textureId].textureId;
+			}
+		}
+	}
+	return 0;
+}
+
 void Level::instanceMeshes(std::vector<std::pair<const Graphics::BasicMesh*, glm::mat4>>& rMeshes_) const
 {
 	switch(this->sourceEngine)
